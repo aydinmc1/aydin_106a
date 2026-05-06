@@ -1,0 +1,9 @@
+white_patch_detector_node:
+  ros__parameters:
+    image_topic: /camera/camera/color/image_raw
+    debug_image_topic: /aydin_v2/white_patches/debug_image
+    white_min_value: 200
+    white_max_saturation: 45
+    min_patch_area: 150.0
+    blur_kernel_size: 5
+    morph_kernel_size: 5

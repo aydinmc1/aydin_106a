@@ -7,8 +7,13 @@ white_patch_detector_node:
     aruco_marker_id: 1
     aruco_marker_size: 0.15
     aruco_axis_length: 0.075
+    aruco_pose_topic: aruco_poses
+    camera_frame: camera_color_optical_frame
     white_min_value: 200
     white_max_saturation: 45
     min_patch_area: 150.0
+    max_patch_area: 0.0
     blur_kernel_size: 5
     morph_kernel_size: 5
+    enable_tuning_window: true
+    tuning_config_path: white_detection_params.json

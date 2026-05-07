@@ -3,6 +3,7 @@ import numpy as np
 import rclpy
 from cv_bridge import CvBridge
 from rclpy.node import Node
+from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import Image
 
 
@@ -28,9 +29,11 @@ class WhitePatchDetectorNode(Node):
             Image,
             self.image_topic,
             self.image_callback,
-            10,
+            qos_profile_sensor_data,
         )
-        self.debug_image_pub = self.create_publisher(Image, self.debug_image_topic, 10)
+        self.debug_image_pub = self.create_publisher(
+            Image, self.debug_image_topic, qos_profile_sensor_data
+        )
 
         self.get_logger().info(f"Subscribing to {self.image_topic}")
         self.get_logger().info(f"Publishing debug images to {self.debug_image_topic}")

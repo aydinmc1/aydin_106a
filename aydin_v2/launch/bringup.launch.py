@@ -2,7 +2,9 @@ import os
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument
+from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
+from launch.conditions import IfCondition
+from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 
@@ -20,6 +22,22 @@ def generate_launch_description():
         "debug_image_topic",
         default_value="/aydin_v2/white_patches/debug_image",
         description="Annotated debug image output topic.",
+    )
+    launch_camera_arg = DeclareLaunchArgument(
+        "launch_camera",
+        default_value="true",
+        description="Start the RealSense camera driver.",
+    )
+
+    realsense_launch = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(
+            os.path.join(
+                get_package_share_directory("realsense2_camera"),
+                "launch",
+                "rs_launch.py",
+            )
+        ),
+        condition=IfCondition(LaunchConfiguration("launch_camera")),
     )
 
     white_patch_detector = Node(
@@ -40,6 +58,8 @@ def generate_launch_description():
         [
             image_topic_arg,
             debug_image_topic_arg,
+            launch_camera_arg,
+            realsense_launch,
             white_patch_detector,
         ]
     )

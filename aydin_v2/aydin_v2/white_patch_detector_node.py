@@ -44,18 +44,18 @@ def quaternion_from_matrix(matrix):
 
 class WhitePatchDetectorNode(Node):
     def __init__(self):
-        super().__init__("white_patch_detector_node")
+        super().__init__("white_patch_detector_node_v2")
 
         self.declare_parameter("image_topic", "/camera/camera/color/image_raw")
         self.declare_parameter("camera_info_topic", "/camera/camera/color/camera_info")
         self.declare_parameter(
-            "debug_image_topic", "/aydin_v2/white_patches/debug_image"
+            "debug_image_topic", "/aydin_v2/white_patches/debug_image_v2"
         )
         self.declare_parameter("aruco_dictionary_id", "DICT_5X5_250")
         self.declare_parameter("aruco_marker_id", 1)
         self.declare_parameter("aruco_marker_size", 0.15)
         self.declare_parameter("aruco_axis_length", 0.075)
-        self.declare_parameter("aruco_pose_topic", "aruco_poses")
+        self.declare_parameter("aruco_pose_topic", "/aydin_v2/aruco_poses_v2")
         self.declare_parameter("camera_frame", "camera_color_optical_frame")
         self.declare_parameter(
             "depth_topic", "/camera/camera/aligned_depth_to_color/image_raw"
@@ -66,12 +66,12 @@ class WhitePatchDetectorNode(Node):
         self.declare_parameter("snapshot_cluster_radius", 0.025)
         self.declare_parameter("snapshot_min_samples", 5)
         self.declare_parameter(
-            "snapshot_pose_topic", "/aydin_v2/nub_snapshot/poses"
+            "snapshot_pose_topic", "/aydin_v2/nub_snapshot_v2/poses"
         )
         self.declare_parameter(
-            "snapshot_marker_topic", "/aydin_v2/nub_snapshot/markers"
+            "snapshot_marker_topic", "/aydin_v2/nub_snapshot_v2/markers"
         )
-        self.declare_parameter("snapshot_frame_prefix", "snapshot_nub")
+        self.declare_parameter("snapshot_frame_prefix", "snapshot_nub_v2")
         self.declare_parameter("white_min_value", 200)
         self.declare_parameter("white_max_saturation", 45)
         self.declare_parameter("min_patch_area", 150.0)
@@ -80,7 +80,7 @@ class WhitePatchDetectorNode(Node):
         self.declare_parameter("morph_kernel_size", 5)
         self.declare_parameter("enable_tuning_window", True)
         self.declare_parameter(
-            "tuning_config_path", "white_detection_params.json"
+            "tuning_config_path", "white_detection_params_v2.json"
         )
 
         self.bridge = CvBridge()
@@ -161,7 +161,7 @@ class WhitePatchDetectorNode(Node):
         self.sync.registerCallback(self.synced_callback)
         self.latest_depth = None
         self.snapshot_service = self.create_service(
-            Trigger, "take_nub_snapshot", self.take_snapshot_callback
+            Trigger, "take_nub_snapshot_v2", self.take_snapshot_callback
         )
 
 
@@ -237,7 +237,7 @@ class WhitePatchDetectorNode(Node):
                     t = TransformStamped()
                     t.header.stamp = msg.header.stamp
                     t.header.frame_id = self.target_frame
-                    t.child_frame_id = f'piece_{patch_count}'
+                    t.child_frame_id = f'piece_v2_{patch_count}'
                     t.transform.translation.x = pt.x
                     t.transform.translation.y = pt.y
                     t.transform.translation.z = pt.z
@@ -273,7 +273,7 @@ class WhitePatchDetectorNode(Node):
                     t = TransformStamped()
                     t.header.stamp = msg.header.stamp
                     t.header.frame_id = self.target_frame
-                    t.child_frame_id = f'nub_{nub_count}'
+                    t.child_frame_id = f'nub_v2_{nub_count}'
                     t.transform.translation.x = pt.x
                     t.transform.translation.y = pt.y
                     t.transform.translation.z = pt.z
@@ -514,7 +514,7 @@ class WhitePatchDetectorNode(Node):
 
         try:
             cv2.createButton(
-                "Save white_detection_params.json",
+                "Save white_detection_params_v2.json",
                 self.tuning_button_callback,
                 None,
                 cv2.QT_PUSH_BUTTON,
@@ -904,7 +904,7 @@ class WhitePatchDetectorNode(Node):
         transform = TransformStamped()
         transform.header.stamp = stamp
         transform.header.frame_id = self.get_aruco_frame_id()
-        transform.child_frame_id = f"ar_marker_{self.aruco_marker_id}"
+        transform.child_frame_id = f"ar_marker_v2_{self.aruco_marker_id}"
         transform.transform.translation.x = pose.position.x
         transform.transform.translation.y = pose.position.y
         transform.transform.translation.z = pose.position.z

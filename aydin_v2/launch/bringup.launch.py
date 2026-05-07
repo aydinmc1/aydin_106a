@@ -21,7 +21,7 @@ def generate_launch_description():
     )
     debug_image_topic_arg = DeclareLaunchArgument(
         "debug_image_topic",
-        default_value="/aydin_v2/white_patches/debug_image",
+        default_value="/aydin_v2/white_patches/debug_image_v2",
         description="Annotated debug image output topic.",
     )
     camera_info_topic_arg = DeclareLaunchArgument(
@@ -56,7 +56,7 @@ def generate_launch_description():
     )
     tuning_config_path_arg = DeclareLaunchArgument(
         "tuning_config_path",
-        default_value="white_detection_params.json",
+        default_value="white_detection_params_v2.json",
         description="JSON file used to load and save white-detection tuning.",
     )
     launch_camera_arg = DeclareLaunchArgument(
@@ -81,8 +81,8 @@ def generate_launch_description():
 
     white_patch_detector = Node(
         package="aydin_v2",
-        executable="white_patch_detector_node",
-        name="white_patch_detector_node",
+        executable="white_patch_detector_node_v2",
+        name="white_patch_detector_node_v2",
         output="screen",
         parameters=[
             params_file,

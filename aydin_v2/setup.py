@@ -24,7 +24,7 @@ setup(
     entry_points={
         "console_scripts": [
             "example_node = aydin_v2.example_node:main",
-            "white_patch_detector_node = aydin_v2.white_patch_detector_node:main",
+            "white_patch_detector_node_v2 = aydin_v2.white_patch_detector_node:main",
         ],
     },
 )

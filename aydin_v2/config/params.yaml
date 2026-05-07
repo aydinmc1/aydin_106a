@@ -1,13 +1,13 @@
-white_patch_detector_node:
+white_patch_detector_node_v2:
   ros__parameters:
     image_topic: /camera/camera/color/image_raw
     camera_info_topic: /camera/camera/color/camera_info
-    debug_image_topic: /aydin_v2/white_patches/debug_image
+    debug_image_topic: /aydin_v2/white_patches/debug_image_v2
     aruco_dictionary_id: DICT_4X4_50
     aruco_marker_id: 1
     aruco_marker_size: 0.04
     aruco_axis_length: 0.02
-    aruco_pose_topic: aruco_poses
+    aruco_pose_topic: /aydin_v2/aruco_poses_v2
     camera_frame: camera_color_optical_frame
     depth_topic: /camera/camera/aligned_depth_to_color/image_raw
     target_frame: base_link
@@ -15,9 +15,9 @@ white_patch_detector_node:
     snapshot_expected_nubs: 11
     snapshot_cluster_radius: 0.025
     snapshot_min_samples: 5
-    snapshot_pose_topic: /aydin_v2/nub_snapshot/poses
-    snapshot_marker_topic: /aydin_v2/nub_snapshot/markers
-    snapshot_frame_prefix: snapshot_nub
+    snapshot_pose_topic: /aydin_v2/nub_snapshot_v2/poses
+    snapshot_marker_topic: /aydin_v2/nub_snapshot_v2/markers
+    snapshot_frame_prefix: snapshot_nub_v2
     white_min_value: 200
     white_max_saturation: 45
     min_patch_area: 150.0
@@ -25,4 +25,4 @@ white_patch_detector_node:
     blur_kernel_size: 5
     morph_kernel_size: 5
     enable_tuning_window: true
-    tuning_config_path: white_detection_params.json
+    tuning_config_path: white_detection_params_v2.json

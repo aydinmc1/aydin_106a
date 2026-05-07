@@ -12,10 +12,18 @@ from cv_bridge import CvBridge
 from geometry_msgs.msg import PointStamped, Pose, PoseArray, TransformStamped
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
+from rclpy.time import Time
 from sensor_msgs.msg import CameraInfo, Image
+from std_msgs.msg import Float32MultiArray
 from std_srvs.srv import Trigger
 from tf2_ros import TransformBroadcaster
-from visualization_msgs.msg import Marker, MarkerArray
+
+from aydin_v2.nub_detection import (
+    GreenNubDetector,
+    NUB_DETECTION_FIELD_COUNT,
+    make_nub_detection_layout,
+    pack_nub_detection,
+)
 
 
 def quaternion_from_matrix(matrix):
@@ -61,23 +69,30 @@ class WhitePatchDetectorNode(Node):
             "depth_topic", "/camera/camera/aligned_depth_to_color/image_raw"
         )
         self.declare_parameter("target_frame", "base_link")
-        self.declare_parameter("snapshot_duration", 3.0)
-        self.declare_parameter("snapshot_expected_nubs", 11)
-        self.declare_parameter("snapshot_cluster_radius", 0.025)
-        self.declare_parameter("snapshot_min_samples", 5)
         self.declare_parameter(
-            "snapshot_pose_topic", "/aydin_v2/nub_snapshot_v2/poses"
+            "live_nub_pose_topic", "/aydin_v2/live_nubs_v2/poses"
         )
         self.declare_parameter(
-            "snapshot_marker_topic", "/aydin_v2/nub_snapshot_v2/markers"
+            "live_nub_detection_topic", "/aydin_v2/live_nubs_v2/detections"
         )
-        self.declare_parameter("snapshot_frame_prefix", "snapshot_nub_v2")
+        self.declare_parameter("snapshot_service_name", "/take_nub_snapshot_v2")
         self.declare_parameter("white_min_value", 200)
         self.declare_parameter("white_max_saturation", 45)
         self.declare_parameter("min_patch_area", 150.0)
         self.declare_parameter("max_patch_area", 0.0)
         self.declare_parameter("blur_kernel_size", 5)
         self.declare_parameter("morph_kernel_size", 5)
+        self.declare_parameter("green_h_min", 35)
+        self.declare_parameter("green_h_max", 85)
+        self.declare_parameter("green_s_min", 80)
+        self.declare_parameter("green_s_max", 255)
+        self.declare_parameter("green_v_min", 50)
+        self.declare_parameter("green_v_max", 255)
+        self.declare_parameter("green_min_area", 20.0)
+        self.declare_parameter("green_max_area", 800.0)
+        self.declare_parameter("green_min_circularity", 0.35)
+        self.declare_parameter("green_blur_kernel_size", 3)
+        self.declare_parameter("green_morph_kernel_size", 3)
         self.declare_parameter("enable_tuning_window", True)
         self.declare_parameter(
             "tuning_config_path", "white_detection_params_v2.json"
@@ -94,17 +109,11 @@ class WhitePatchDetectorNode(Node):
         self.camera_frame = self.get_parameter("camera_frame").value
         self.depth_topic = self.get_parameter("depth_topic").value
         self.target_frame = self.get_parameter("target_frame").value
-        self.snapshot_duration = float(self.get_parameter("snapshot_duration").value)
-        self.snapshot_expected_nubs = int(
-            self.get_parameter("snapshot_expected_nubs").value
-        )
-        self.snapshot_cluster_radius = float(
-            self.get_parameter("snapshot_cluster_radius").value
-        )
-        self.snapshot_min_samples = int(self.get_parameter("snapshot_min_samples").value)
-        self.snapshot_pose_topic = self.get_parameter("snapshot_pose_topic").value
-        self.snapshot_marker_topic = self.get_parameter("snapshot_marker_topic").value
-        self.snapshot_frame_prefix = self.get_parameter("snapshot_frame_prefix").value
+        self.live_nub_pose_topic = self.get_parameter("live_nub_pose_topic").value
+        self.live_nub_detection_topic = self.get_parameter(
+            "live_nub_detection_topic"
+        ).value
+        self.snapshot_service_name = self.get_parameter("snapshot_service_name").value
         self.info_msg = None
         self.camera_matrix = None
         self.distortion = None
@@ -120,11 +129,10 @@ class WhitePatchDetectorNode(Node):
         self.save_trackbar_armed = False
         self.snapshot_trackbar_armed = False
         self.white_settings = self.load_white_settings()
-        self.snapshot_active = False
-        self.snapshot_start_time = None
-        self.snapshot_samples = []
-        self.snapshot_id = 0
-        self.latest_snapshot_poses = []
+        self.green_settings = self.load_green_settings()
+        self.green_nub_detector = GreenNubDetector(self.green_settings)
+        self.snapshot_request_pending = False
+        self.last_snapshot_status = "Snapshot service not called"
 
         dictionary_name = self.get_parameter("aruco_dictionary_id").value
         self.aruco_dictionary = self.get_aruco_dictionary(dictionary_name)
@@ -140,30 +148,35 @@ class WhitePatchDetectorNode(Node):
         self.aruco_poses_pub = self.create_publisher(
             PoseArray, self.aruco_pose_topic, 10
         )
-        self.snapshot_poses_pub = self.create_publisher(
-            PoseArray, self.snapshot_pose_topic, 10
+        self.live_nub_poses_pub = self.create_publisher(
+            PoseArray, self.live_nub_pose_topic, 10
         )
-        self.snapshot_markers_pub = self.create_publisher(
-            MarkerArray, self.snapshot_marker_topic, 10
+        self.live_nub_detections_pub = self.create_publisher(
+            Float32MultiArray, self.live_nub_detection_topic, 10
         )
         self.tf_broadcaster = TransformBroadcaster(self)
         self.tf_buffer = tf2_ros.Buffer()
         self.tf_listener = tf2_ros.TransformListener(self.tf_buffer, self)
 
         self.depth_sub = message_filters.Subscriber(
-            self, Image, self.depth_topic,
-            qos_profile=qos_profile_sensor_data)
-        self.rgb_sub = message_filters.Subscriber(
-            self, Image, self.image_topic,
-            qos_profile=qos_profile_sensor_data)
-        self.sync = message_filters.ApproximateTimeSynchronizer(
-            [self.rgb_sub, self.depth_sub], queue_size=10, slop=0.1)
-        self.sync.registerCallback(self.synced_callback)
-        self.latest_depth = None
-        self.snapshot_service = self.create_service(
-            Trigger, "take_nub_snapshot_v2", self.take_snapshot_callback
+            self,
+            Image,
+            self.depth_topic,
+            qos_profile=qos_profile_sensor_data,
         )
-
+        self.rgb_sub = message_filters.Subscriber(
+            self,
+            Image,
+            self.image_topic,
+            qos_profile=qos_profile_sensor_data,
+        )
+        self.sync = message_filters.ApproximateTimeSynchronizer(
+            [self.rgb_sub, self.depth_sub],
+            queue_size=10,
+            slop=0.1,
+        )
+        self.sync.registerCallback(self.synced_callback)
+        self.snapshot_client = self.create_client(Trigger, self.snapshot_service_name)
 
         self.get_logger().info(f"Subscribing to {self.image_topic}")
         self.get_logger().info(f"Subscribing to {self.depth_topic}")
@@ -171,8 +184,12 @@ class WhitePatchDetectorNode(Node):
         self.get_logger().info(f"Publishing debug images to {self.debug_image_topic}")
         self.get_logger().info(f"Publishing ArUco poses to {self.aruco_pose_topic}")
         self.get_logger().info(
-            f"Publishing nub snapshots to {self.snapshot_pose_topic}"
+            f"Publishing live nub poses to {self.live_nub_pose_topic}"
         )
+        self.get_logger().info(
+            f"Publishing live nub detections to {self.live_nub_detection_topic}"
+        )
+        self.get_logger().info(f"Snapshot service: {self.snapshot_service_name}")
         self.get_logger().info(f"Drawing axes for ArUco marker {self.aruco_marker_id}")
         if self.enable_tuning_window:
             self.get_logger().info(
@@ -185,8 +202,7 @@ class WhitePatchDetectorNode(Node):
         self.distortion = np.array(msg.d)
         self.destroy_subscription(self.camera_info_sub)
 
-
-    def image_callback(self, msg):
+    def process_frame(self, msg, depth_image):
         try:
             cv_image = self.bridge.imgmsg_to_cv2(msg, desired_encoding="bgr8")
         except Exception as exc:
@@ -223,36 +239,39 @@ class WhitePatchDetectorNode(Node):
             center_x = int(moments["m10"] / moments["m00"])
             center_y = int(moments["m01"] / moments["m00"])
 
-            if self.latest_depth is not None and self.camera_matrix is not None:
-                pt = self.get_3d_position(center_x, center_y, self.latest_depth)
+            if self.camera_matrix is not None:
+                pt = self.get_3d_position(center_x, center_y, depth_image)
                 if pt is not None:
-                    self.get_logger().info(
-                        f'Piece at {self.target_frame}: '
-                        f'x={pt.x:.3f} y={pt.y:.3f} z={pt.z:.3f}')
-                    cv2.putText(debug_image,
-                        f'{pt.x:.2f},{pt.y:.2f},{pt.z:.2f}',
+                    self.get_logger().debug(
+                        f"Piece at {self.target_frame}: "
+                        f"x={pt.x:.3f} y={pt.y:.3f} z={pt.z:.3f}"
+                    )
+                    cv2.putText(
+                        debug_image,
+                        f"{pt.x:.2f},{pt.y:.2f},{pt.z:.2f}",
                         (center_x + 10, center_y),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
-                    # publish TF frame for this piece
-                    t = TransformStamped()
-                    t.header.stamp = msg.header.stamp
-                    t.header.frame_id = self.target_frame
-                    t.child_frame_id = f'piece_v2_{patch_count}'
-                    t.transform.translation.x = pt.x
-                    t.transform.translation.y = pt.y
-                    t.transform.translation.z = pt.z
-                    t.transform.rotation.w = 1.0
-                    t.transform.rotation.x = 0.0
-                    t.transform.rotation.y = 0.0
-                    t.transform.rotation.z = 0.0
-                    self.tf_broadcaster.sendTransform(t)
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        0.5,
+                        (0, 255, 255),
+                        1,
+                    )
+                    self.publish_point_transform(
+                        f"piece_v2_{patch_count}",
+                        pt,
+                        msg.header.stamp,
+                    )
 
             cv2.drawContours(debug_image, [contour], -1, (0, 255, 0), 2)
             cv2.circle(debug_image, (center_x, center_y), 5, (0, 0, 255), -1)
             patch_count += 1
 
-        green_candidates = self.detect_green_nubs(cv_image)
+        green_candidates = self.green_nub_detector.detect(cv_image)
         nub_count = 0
+        live_nub_poses = PoseArray()
+        live_nub_poses.header = msg.header
+        live_nub_poses.header.frame_id = self.target_frame
+        live_detection_values = []
+
         for candidate in green_candidates:
             cx = candidate["u"]
             cy = candidate["v"]
@@ -261,44 +280,45 @@ class WhitePatchDetectorNode(Node):
             cv2.circle(debug_image, (cx, cy), 6, (0, 255, 0), -1)
             cv2.drawContours(debug_image, [contour], -1, (0, 255, 0), 2)
 
-            if self.latest_depth is not None and self.camera_matrix is not None:
-                pt = self.get_3d_position(cx, cy, self.latest_depth)
+            if self.camera_matrix is not None:
+                pt = self.get_3d_position(cx, cy, depth_image)
                 if pt is not None:
-                    cv2.putText(debug_image,
-                        f'NUB {pt.x:.2f},{pt.y:.2f},{pt.z:.2f}',
+                    cv2.putText(
+                        debug_image,
+                        f"NUB {pt.x:.2f},{pt.y:.2f},{pt.z:.2f}",
                         (cx + 10, cy),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        0.5,
+                        (0, 255, 0),
+                        1,
+                    )
+                    self.publish_point_transform(
+                        f"nub_v2_{nub_count}",
+                        pt,
+                        msg.header.stamp,
+                    )
 
-                    # publish TF frame from nub position
-                    t = TransformStamped()
-                    t.header.stamp = msg.header.stamp
-                    t.header.frame_id = self.target_frame
-                    t.child_frame_id = f'nub_v2_{nub_count}'
-                    t.transform.translation.x = pt.x
-                    t.transform.translation.y = pt.y
-                    t.transform.translation.z = pt.z
-                    t.transform.rotation.w = 1.0
-                    t.transform.rotation.x = 0.0
-                    t.transform.rotation.y = 0.0
-                    t.transform.rotation.z = 0.0
-                    self.tf_broadcaster.sendTransform(t)
-                    if self.snapshot_active:
-                        self.snapshot_samples.append(
-                            {
-                                "xyz": [float(pt.x), float(pt.y), float(pt.z)],
-                                "uv": [int(cx), int(cy)],
-                                "area": float(candidate["area"]),
-                                "circularity": float(candidate["circularity"]),
-                                "stamp": msg.header.stamp.sec
-                                + msg.header.stamp.nanosec * 1e-9,
-                            }
+                    pose = Pose()
+                    pose.position.x = float(pt.x)
+                    pose.position.y = float(pt.y)
+                    pose.position.z = float(pt.z)
+                    pose.orientation.w = 1.0
+                    live_nub_poses.poses.append(pose)
+                    live_detection_values.extend(
+                        pack_nub_detection(
+                            pt,
+                            cx,
+                            cy,
+                            candidate["area"],
+                            candidate["circularity"],
                         )
+                    )
             nub_count += 1
 
+        self.live_nub_poses_pub.publish(live_nub_poses)
+        self.publish_live_nub_detection_array(live_detection_values)
 
         self.process_aruco_marker(cv_image, debug_image, msg.header.stamp)
-        self.update_snapshot_capture()
-        self.publish_latest_snapshot_transforms(msg.header.stamp)
 
         if self.enable_tuning_window:
             self.show_tuning_window(debug_image, mask)
@@ -352,54 +372,26 @@ class WhitePatchDetectorNode(Node):
 
         return mask
 
-    def find_green_mask(self, cv_image):
-        blur_kernel_size = self.get_odd_kernel_size(3)
-        working_image = cv2.GaussianBlur(cv_image, (blur_kernel_size, blur_kernel_size), 0)
-        hsv_image = cv2.cvtColor(working_image, cv2.COLOR_BGR2HSV)
-        lower_green = np.array([35, 80, 50], dtype=np.uint8)
-        upper_green = np.array([85, 255, 255], dtype=np.uint8)
-        mask = cv2.inRange(hsv_image, lower_green, upper_green)
-        kernel = np.ones((3, 3), dtype=np.uint8)
-        mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
-        return mask
-
-    def detect_green_nubs(self, cv_image):
-        green_mask = self.find_green_mask(cv_image)
-        green_contours, _ = cv2.findContours(
-            green_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
-        )
-        candidates = []
-
-        for contour in green_contours:
-            area = cv2.contourArea(contour)
-            if area < 20 or area > 800:
-                continue
-
-            perimeter = cv2.arcLength(contour, True)
-            if perimeter == 0:
-                continue
-
-            circularity = 4 * np.pi * area / (perimeter ** 2)
-            if circularity < 0.35:
-                continue
-
-            moments = cv2.moments(contour)
-            if moments["m00"] == 0:
-                continue
-
-            candidates.append(
-                {
-                    "u": int(moments["m10"] / moments["m00"]),
-                    "v": int(moments["m01"] / moments["m00"]),
-                    "area": float(area),
-                    "circularity": float(circularity),
-                    "contour": contour,
-                }
-            )
-
-        return candidates
-
-
+    def load_green_settings(self):
+        return {
+            "green_h_min": int(self.get_parameter("green_h_min").value),
+            "green_h_max": int(self.get_parameter("green_h_max").value),
+            "green_s_min": int(self.get_parameter("green_s_min").value),
+            "green_s_max": int(self.get_parameter("green_s_max").value),
+            "green_v_min": int(self.get_parameter("green_v_min").value),
+            "green_v_max": int(self.get_parameter("green_v_max").value),
+            "green_min_area": float(self.get_parameter("green_min_area").value),
+            "green_max_area": float(self.get_parameter("green_max_area").value),
+            "green_min_circularity": float(
+                self.get_parameter("green_min_circularity").value
+            ),
+            "green_blur_kernel_size": int(
+                self.get_parameter("green_blur_kernel_size").value
+            ),
+            "green_morph_kernel_size": int(
+                self.get_parameter("green_morph_kernel_size").value
+            ),
+        }
 
     def load_white_settings(self):
         defaults = {
@@ -580,23 +572,17 @@ class WhitePatchDetectorNode(Node):
         if self.snapshot_trackbar_armed:
             snapshot_value = cv2.getTrackbarPos("Take snapshot", self.tuning_window_name)
             if snapshot_value == 1:
-                self.start_snapshot()
+                self.call_snapshot_service()
                 cv2.setTrackbarPos("Take snapshot", self.tuning_window_name, 0)
 
     def show_tuning_window(self, debug_image, mask):
         mask_bgr = cv2.cvtColor(mask, cv2.COLOR_GRAY2BGR)
-        status = "Snapshot idle"
-        if self.snapshot_active and self.snapshot_start_time is not None:
-            elapsed = (
-                self.get_clock().now() - self.snapshot_start_time
-            ).nanoseconds * 1e-9
-            remaining = max(0.0, self.snapshot_duration - elapsed)
-            status = (
-                f"Snapshot: {remaining:.1f}s left, "
-                f"{len(self.snapshot_samples)} samples"
-            )
-        elif self.latest_snapshot_poses:
-            status = f"Snapshot saved: {len(self.latest_snapshot_poses)} nubs"
+        if self.snapshot_request_pending:
+            status = "Snapshot request pending"
+        elif self.snapshot_client.service_is_ready():
+            status = self.last_snapshot_status
+        else:
+            status = "Snapshot service not ready"
 
         cv2.putText(
             debug_image,
@@ -626,222 +612,59 @@ class WhitePatchDetectorNode(Node):
         self.save_requested = True
 
     def snapshot_button_callback(self, *args):
-        self.start_snapshot()
+        self.call_snapshot_service()
 
     def noop_trackbar_callback(self, value):
         pass
 
-    def take_snapshot_callback(self, request, response):
-        del request
-        self.start_snapshot()
-        response.success = True
-        response.message = (
-            f"Started {self.snapshot_duration:.1f}s green nub snapshot"
-        )
-        return response
-
-    def start_snapshot(self):
-        self.snapshot_active = True
-        self.snapshot_start_time = self.get_clock().now()
-        self.snapshot_samples = []
-        self.latest_snapshot_poses = []
-        self.snapshot_id += 1
-        self.clear_snapshot_outputs()
-        self.get_logger().info(
-            f"Started green nub snapshot {self.snapshot_id}: "
-            f"{self.snapshot_duration:.1f}s, expecting "
-            f"{self.snapshot_expected_nubs} nubs"
-        )
-
-    def update_snapshot_capture(self):
-        if not self.snapshot_active:
+    def call_snapshot_service(self):
+        if self.snapshot_request_pending:
             return
 
-        elapsed = (
-            self.get_clock().now() - self.snapshot_start_time
-        ).nanoseconds * 1e-9
-        if elapsed < self.snapshot_duration:
+        if not self.snapshot_client.service_is_ready():
+            self.last_snapshot_status = "Snapshot service not ready"
+            self.get_logger().warn(
+                f"Snapshot service {self.snapshot_service_name} is not ready"
+            )
             return
 
-        self.snapshot_active = False
-        self.finalize_snapshot()
+        self.snapshot_request_pending = True
+        self.last_snapshot_status = "Snapshot requested"
+        future = self.snapshot_client.call_async(Trigger.Request())
+        future.add_done_callback(self.snapshot_response_callback)
 
-    def finalize_snapshot(self):
-        clusters = self.cluster_snapshot_samples()
-        self.latest_snapshot_poses = [cluster["pose"] for cluster in clusters]
-        self.publish_snapshot_outputs(clusters)
-        self.get_logger().info(
-            f"Finished snapshot {self.snapshot_id}: "
-            f"{len(self.snapshot_samples)} samples -> {len(clusters)} nubs"
-        )
+    def snapshot_response_callback(self, future):
+        self.snapshot_request_pending = False
+        try:
+            response = future.result()
+        except Exception as exc:
+            self.last_snapshot_status = "Snapshot service failed"
+            self.get_logger().error(f"Snapshot service call failed: {exc}")
+            return
 
-    def cluster_snapshot_samples(self):
-        if not self.snapshot_samples:
-            return []
+        self.last_snapshot_status = response.message
+        if response.success:
+            self.get_logger().info(response.message)
+        else:
+            self.get_logger().warn(response.message)
 
-        points = np.array([sample["xyz"] for sample in self.snapshot_samples])
-        labels = self.dbscan_xy(points, self.snapshot_cluster_radius)
-        clusters = []
+    def publish_live_nub_detection_array(self, values):
+        detections_msg = Float32MultiArray()
+        detection_count = len(values) // NUB_DETECTION_FIELD_COUNT
+        detections_msg.layout.dim = make_nub_detection_layout(detection_count)
+        detections_msg.data = values
+        self.live_nub_detections_pub.publish(detections_msg)
 
-        for label in sorted(set(labels)):
-            if label == -1:
-                continue
-
-            indexes = np.where(labels == label)[0]
-            if len(indexes) < self.snapshot_min_samples:
-                continue
-
-            cluster_points = points[indexes]
-            median_xyz = np.median(cluster_points, axis=0)
-            xy_spread = float(
-                np.max(np.linalg.norm(cluster_points[:, :2] - median_xyz[:2], axis=1))
-            )
-            pose = Pose()
-            pose.position.x = float(median_xyz[0])
-            pose.position.y = float(median_xyz[1])
-            pose.position.z = float(median_xyz[2])
-            pose.orientation.w = 1.0
-            clusters.append(
-                {
-                    "pose": pose,
-                    "samples": int(len(indexes)),
-                    "spread": xy_spread,
-                }
-            )
-
-        clusters.sort(key=lambda cluster: cluster["samples"], reverse=True)
-        return clusters[: self.snapshot_expected_nubs]
-
-    def dbscan_xy(self, points, eps):
-        labels = np.full(len(points), -2, dtype=int)
-        cluster_id = 0
-
-        for point_index in range(len(points)):
-            if labels[point_index] != -2:
-                continue
-
-            neighbors = self.region_query_xy(points, point_index, eps)
-            if len(neighbors) < self.snapshot_min_samples:
-                labels[point_index] = -1
-                continue
-
-            labels[point_index] = cluster_id
-            seeds = list(neighbors)
-            seed_cursor = 0
-            while seed_cursor < len(seeds):
-                neighbor_index = seeds[seed_cursor]
-                if labels[neighbor_index] == -1:
-                    labels[neighbor_index] = cluster_id
-                if labels[neighbor_index] != -2:
-                    seed_cursor += 1
-                    continue
-
-                labels[neighbor_index] = cluster_id
-                expanded_neighbors = self.region_query_xy(points, neighbor_index, eps)
-                if len(expanded_neighbors) >= self.snapshot_min_samples:
-                    for expanded_index in expanded_neighbors:
-                        if expanded_index not in seeds:
-                            seeds.append(expanded_index)
-                seed_cursor += 1
-
-            cluster_id += 1
-
-        return labels
-
-    def region_query_xy(self, points, point_index, eps):
-        distances = np.linalg.norm(points[:, :2] - points[point_index, :2], axis=1)
-        return np.where(distances <= eps)[0].tolist()
-
-    def clear_snapshot_outputs(self):
-        pose_array = PoseArray()
-        pose_array.header.stamp = self.get_clock().now().to_msg()
-        pose_array.header.frame_id = self.target_frame
-        self.snapshot_poses_pub.publish(pose_array)
-
-        delete_all = Marker()
-        delete_all.action = Marker.DELETEALL
-        marker_array = MarkerArray()
-        marker_array.markers.append(delete_all)
-        self.snapshot_markers_pub.publish(marker_array)
-
-    def publish_snapshot_outputs(self, clusters):
-        stamp = self.get_clock().now().to_msg()
-
-        pose_array = PoseArray()
-        pose_array.header.stamp = stamp
-        pose_array.header.frame_id = self.target_frame
-        pose_array.poses = [cluster["pose"] for cluster in clusters]
-        self.snapshot_poses_pub.publish(pose_array)
-
-        marker_array = MarkerArray()
-
-        for index, cluster in enumerate(clusters):
-            pose = cluster["pose"]
-            frame_name = f"{self.snapshot_frame_prefix}_{index}"
-            self.publish_snapshot_transform(frame_name, pose, stamp)
-
-            marker = Marker()
-            marker.header.stamp = stamp
-            marker.header.frame_id = self.target_frame
-            marker.ns = "nub_snapshot"
-            marker.id = index
-            marker.type = Marker.SPHERE
-            marker.action = Marker.ADD
-            marker.pose = pose
-            marker.scale.x = 0.025
-            marker.scale.y = 0.025
-            marker.scale.z = 0.025
-            marker.color.r = 0.0
-            marker.color.g = 1.0
-            marker.color.b = 0.1
-            marker.color.a = 0.9
-            marker_array.markers.append(marker)
-
-            text_marker = Marker()
-            text_marker.header.stamp = stamp
-            text_marker.header.frame_id = self.target_frame
-            text_marker.ns = "nub_snapshot_labels"
-            text_marker.id = index
-            text_marker.type = Marker.TEXT_VIEW_FACING
-            text_marker.action = Marker.ADD
-            text_marker.pose.position.x = pose.position.x
-            text_marker.pose.position.y = pose.position.y
-            text_marker.pose.position.z = pose.position.z + 0.035
-            text_marker.pose.orientation.w = 1.0
-            text_marker.scale.z = 0.025
-            text_marker.color.r = 1.0
-            text_marker.color.g = 1.0
-            text_marker.color.b = 1.0
-            text_marker.color.a = 1.0
-            text_marker.text = f"{index}: {cluster['samples']} samples"
-            marker_array.markers.append(text_marker)
-
-        self.snapshot_markers_pub.publish(marker_array)
-
-    def publish_snapshot_transform(self, frame_name, pose, stamp):
+    def publish_point_transform(self, child_frame_id, point, stamp):
         transform = TransformStamped()
         transform.header.stamp = stamp
         transform.header.frame_id = self.target_frame
-        transform.child_frame_id = frame_name
-        transform.transform.translation.x = pose.position.x
-        transform.transform.translation.y = pose.position.y
-        transform.transform.translation.z = pose.position.z
-        transform.transform.rotation.x = pose.orientation.x
-        transform.transform.rotation.y = pose.orientation.y
-        transform.transform.rotation.z = pose.orientation.z
-        transform.transform.rotation.w = pose.orientation.w
+        transform.child_frame_id = child_frame_id
+        transform.transform.translation.x = point.x
+        transform.transform.translation.y = point.y
+        transform.transform.translation.z = point.z
+        transform.transform.rotation.w = 1.0
         self.tf_broadcaster.sendTransform(transform)
-
-    def publish_latest_snapshot_transforms(self, stamp):
-        if not self.latest_snapshot_poses:
-            return
-
-        for index, pose in enumerate(self.latest_snapshot_poses):
-            self.publish_snapshot_transform(
-                f"{self.snapshot_frame_prefix}_{index}",
-                pose,
-                stamp,
-            )
 
     def process_aruco_marker(self, source_image, debug_image, stamp):
         if (
@@ -966,55 +789,51 @@ class WhitePatchDetectorNode(Node):
         # sample 7x7 neighborhood
         h, w = depth_image.shape
         u, v = int(u), int(v)
-        u1, u2 = max(0, u-3), min(w, u+4)
-        v1, v2 = max(0, v-3), min(h, v+4)
+        u1, u2 = max(0, u - 3), min(w, u + 4)
+        v1, v2 = max(0, v - 3), min(h, v + 4)
         patch = depth_image[v1:v2, u1:u2]
         nonzero = patch[patch > 0]
         if len(nonzero) == 0:
             return None
-        Z = float(np.median(nonzero)) / 1000.0
-        if Z <= 0 or Z > 1.5:
+        z = float(np.median(nonzero)) / 1000.0
+        if z <= 0 or z > 1.5:
             return None
 
         fx = self.camera_matrix[0, 0]
         fy = self.camera_matrix[1, 1]
-        cx = self.camera_matrix[0, 2]
-        cy = self.camera_matrix[1, 2]
+        camera_cx = self.camera_matrix[0, 2]
+        camera_cy = self.camera_matrix[1, 2]
 
-        # in camera_depth_optical_frame
-        X = (u - cx) * Z / fx
-        Y = (v - cy) * Z / fy
+        x = (u - camera_cx) * z / fx
+        y = (v - camera_cy) * z / fy
 
         try:
             transform = self.tf_buffer.lookup_transform(
                 self.target_frame,
                 self.camera_frame,
-                rclpy.time.Time())
+                Time(),
+            )
             pt = PointStamped()
             pt.header.frame_id = self.camera_frame
-            pt.point.x = X
-            pt.point.y = Y
-            pt.point.z = Z
+            pt.point.x = x
+            pt.point.y = y
+            pt.point.z = z
             pt_base = tf2_geometry_msgs.do_transform_point(pt, transform)
             return pt_base.point
-        except Exception as e:
-            self.get_logger().warn(f'TF lookup failed: {e}')
+        except Exception as exc:
+            self.get_logger().warn(f"TF lookup failed: {exc}")
             return None
-
 
     def synced_callback(self, rgb_msg, depth_msg):
         try:
             depth_image = self.bridge.imgmsg_to_cv2(
-                depth_msg, desired_encoding='passthrough')
-        except Exception as e:
-            self.get_logger().error(f'Depth conversion failed: {e}')
+                depth_msg,
+                desired_encoding="passthrough",
+            )
+        except Exception as exc:
+            self.get_logger().error(f"Depth conversion failed: {exc}")
             return
-        self.latest_depth = depth_image
-        self.image_callback(rgb_msg)
-
-
-
-
+        self.process_frame(rgb_msg, depth_image)
 
 
 def main(args=None):

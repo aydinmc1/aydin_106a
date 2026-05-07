@@ -93,15 +93,29 @@ def generate_launch_description():
                 "debug_image_topic": LaunchConfiguration("debug_image_topic"),
                 "camera_frame": LaunchConfiguration("camera_frame"),
                 "target_frame": LaunchConfiguration("target_frame"),
-                "snapshot_duration": ParameterValue(
-                    LaunchConfiguration("snapshot_duration"),
-                    value_type=float,
-                ),
                 "enable_tuning_window": ParameterValue(
                     LaunchConfiguration("enable_tuning_window"),
                     value_type=bool,
                 ),
                 "tuning_config_path": LaunchConfiguration("tuning_config_path"),
+            },
+        ],
+    )
+
+    nub_snapshot = Node(
+        package="aydin_v2",
+        executable="nub_snapshot_node_v2",
+        name="nub_snapshot_node_v2",
+        output="screen",
+        parameters=[
+            params_file,
+            {
+                "debug_image_topic": LaunchConfiguration("debug_image_topic"),
+                "target_frame": LaunchConfiguration("target_frame"),
+                "snapshot_duration": ParameterValue(
+                    LaunchConfiguration("snapshot_duration"),
+                    value_type=float,
+                ),
             },
         ],
     )
@@ -120,5 +134,6 @@ def generate_launch_description():
             launch_camera_arg,
             realsense_launch,
             white_patch_detector,
+            nub_snapshot,
         ]
     )

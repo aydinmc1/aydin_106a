@@ -11,18 +11,40 @@ white_patch_detector_node_v2:
     camera_frame: camera_color_optical_frame
     depth_topic: /camera/camera/aligned_depth_to_color/image_raw
     target_frame: base_link
-    snapshot_duration: 3.0
-    snapshot_expected_nubs: 11
-    snapshot_cluster_radius: 0.025
-    snapshot_min_samples: 5
-    snapshot_pose_topic: /aydin_v2/nub_snapshot_v2/poses
-    snapshot_marker_topic: /aydin_v2/nub_snapshot_v2/markers
-    snapshot_frame_prefix: snapshot_nub_v2
+    live_nub_pose_topic: /aydin_v2/live_nubs_v2/poses
+    live_nub_detection_topic: /aydin_v2/live_nubs_v2/detections
+    snapshot_service_name: /take_nub_snapshot_v2
     white_min_value: 200
     white_max_saturation: 45
     min_patch_area: 150.0
     max_patch_area: 0.0
     blur_kernel_size: 5
     morph_kernel_size: 5
+    green_h_min: 35
+    green_h_max: 85
+    green_s_min: 80
+    green_s_max: 255
+    green_v_min: 50
+    green_v_max: 255
+    green_min_area: 20.0
+    green_max_area: 800.0
+    green_min_circularity: 0.35
+    green_blur_kernel_size: 3
+    green_morph_kernel_size: 3
     enable_tuning_window: true
     tuning_config_path: white_detection_params_v2.json
+
+nub_snapshot_node_v2:
+  ros__parameters:
+    live_nub_detection_topic: /aydin_v2/live_nubs_v2/detections
+    debug_image_topic: /aydin_v2/white_patches/debug_image_v2
+    target_frame: base_link
+    snapshot_duration: 3.0
+    snapshot_expected_nubs: 11
+    snapshot_cluster_radius: 0.025
+    snapshot_min_samples: 5
+    snapshot_pose_topic: /aydin_v2/nub_snapshot_v2/poses
+    snapshot_point_topic: /aydin_v2/nub_snapshot_v2/points
+    snapshot_frame_prefix: snapshot_nub_v2
+    snapshot_service_name: /take_nub_snapshot_v2
+    enable_snapshot_popup: true

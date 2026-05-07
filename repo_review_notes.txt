@@ -1,0 +1,29 @@
+Repo review notes - May 7, 2026
+
+Recent changes noticed:
+- The detector now handles both the tuned yellow/white-ish mask and a separate green nub mask.
+- Green nubs appear to be the main grasp-relevant target.
+- The node now uses aligned depth plus camera intrinsics to estimate 3D centroid locations.
+- It broadcasts TF frames for detected pieces and nubs.
+- ArUco settings were updated to DICT_4X4_50 with a 0.04 m marker and 0.02 m axis length.
+
+Follow-up items to fix or verify:
+- package.xml needs dependencies for message_filters and tf2_geometry_msgs.
+- bringup.launch.py should likely enable aligned depth for RealSense, since the node subscribes to /camera/camera/aligned_depth_to_color/image_raw.
+- The RGB image is currently subscribed to twice: direct image_sub and message_filters rgb_sub. Prefer one synchronized RGB+depth path to avoid duplicate processing and stale depth.
+- Green nub TF frame names use patch_count, which counts the yellow/white pieces. Use a separate nub_count so each nub frame name is unique.
+- Green HSV thresholds are hard-coded. Since green nubs are the important target, make these tunable/saved like the existing mask settings.
+- get_3d_position hard-codes base_link and camera_color_optical_frame. Consider adding target_frame and using the existing camera_frame parameter.
+- Piece/nub TF frames use identity orientation in base_link. That is fine for marking points, but the axes are not board-aligned or surface-normal-aligned.
+- The older white naming is now confusing if the main body mask is yellow. Rename later when the behavior settles.
+
+
+fix for cleaner implementation:
+white_patch_detector_node
+  publishes live green nub detections
+
+nub_snapshot_node
+  service: /take_nub_snapshot
+  subscribes to live detections
+  clusters over time
+  publishes /aydin_v2/nub_snapshot/poses + markers + TF

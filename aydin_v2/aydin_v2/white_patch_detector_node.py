@@ -31,9 +31,7 @@ class WhitePatchDetectorNode(Node):
             self.image_callback,
             qos_profile_sensor_data,
         )
-        self.debug_image_pub = self.create_publisher(
-            Image, self.debug_image_topic, qos_profile_sensor_data
-        )
+        self.debug_image_pub = self.create_publisher(Image, self.debug_image_topic, 10)
 
         self.get_logger().info(f"Subscribing to {self.image_topic}")
         self.get_logger().info(f"Publishing debug images to {self.debug_image_topic}")

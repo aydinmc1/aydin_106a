@@ -21,8 +21,8 @@ def generate_launch_description():
     )
     debug_image_topic_arg = DeclareLaunchArgument(
         "debug_image_topic",
-        default_value="/aydin_v2/white_patches/debug_image_v2",
-        description="Annotated debug image output topic.",
+        default_value="/aydin_v2/green_nubs/debug_image_v2",
+        description="Annotated green nub debug image output topic.",
     )
     camera_info_topic_arg = DeclareLaunchArgument(
         "camera_info_topic",
@@ -42,7 +42,42 @@ def generate_launch_description():
     target_frame_arg = DeclareLaunchArgument(
         "target_frame",
         default_value="base_link",
-        description="Frame used for piece and snapshot nub outputs.",
+        description="Frame used for live and snapshot nub outputs.",
+    )
+    camera_tf_child_frame_arg = DeclareLaunchArgument(
+        "camera_tf_child_frame",
+        default_value="camera_color_optical_frame",
+        description="Camera optical frame connected to target_frame by a static transform.",
+    )
+    camera_tf_x_arg = DeclareLaunchArgument(
+        "camera_tf_x",
+        default_value="0.0",
+        description="Static camera transform x offset in meters.",
+    )
+    camera_tf_y_arg = DeclareLaunchArgument(
+        "camera_tf_y",
+        default_value="0.0",
+        description="Static camera transform y offset in meters.",
+    )
+    camera_tf_z_arg = DeclareLaunchArgument(
+        "camera_tf_z",
+        default_value="0.0",
+        description="Static camera transform z offset in meters.",
+    )
+    camera_tf_roll_arg = DeclareLaunchArgument(
+        "camera_tf_roll",
+        default_value="0.0",
+        description="Static camera transform roll in radians.",
+    )
+    camera_tf_pitch_arg = DeclareLaunchArgument(
+        "camera_tf_pitch",
+        default_value="0.0",
+        description="Static camera transform pitch in radians.",
+    )
+    camera_tf_yaw_arg = DeclareLaunchArgument(
+        "camera_tf_yaw",
+        default_value="0.0",
+        description="Static camera transform yaw in radians.",
     )
     snapshot_duration_arg = DeclareLaunchArgument(
         "snapshot_duration",
@@ -52,12 +87,12 @@ def generate_launch_description():
     enable_tuning_window_arg = DeclareLaunchArgument(
         "enable_tuning_window",
         default_value="true",
-        description="Open the interactive white-detection tuning window.",
+        description="Open the interactive green nub tuning window.",
     )
     tuning_config_path_arg = DeclareLaunchArgument(
         "tuning_config_path",
-        default_value="white_detection_params_v2.json",
-        description="JSON file used to load and save white-detection tuning.",
+        default_value="green_detection_params_v2.json",
+        description="JSON file used to load and save green nub tuning.",
     )
     launch_camera_arg = DeclareLaunchArgument(
         "launch_camera",
@@ -76,13 +111,39 @@ def generate_launch_description():
         condition=IfCondition(LaunchConfiguration("launch_camera")),
         launch_arguments={
             "align_depth.enable": "true",
+            "publish_tf": "false",
         }.items(),
     )
 
-    white_patch_detector = Node(
+    camera_static_tf = Node(
+        package="tf2_ros",
+        executable="static_transform_publisher",
+        name="camera_optical_static_tf_v2",
+        output="screen",
+        arguments=[
+            "--x",
+            LaunchConfiguration("camera_tf_x"),
+            "--y",
+            LaunchConfiguration("camera_tf_y"),
+            "--z",
+            LaunchConfiguration("camera_tf_z"),
+            "--roll",
+            LaunchConfiguration("camera_tf_roll"),
+            "--pitch",
+            LaunchConfiguration("camera_tf_pitch"),
+            "--yaw",
+            LaunchConfiguration("camera_tf_yaw"),
+            "--frame-id",
+            LaunchConfiguration("target_frame"),
+            "--child-frame-id",
+            LaunchConfiguration("camera_tf_child_frame"),
+        ],
+    )
+
+    green_nub_detector = Node(
         package="aydin_v2",
-        executable="white_patch_detector_node_v2",
-        name="white_patch_detector_node_v2",
+        executable="green_nub_detector_node_v2",
+        name="green_nub_detector_node_v2",
         output="screen",
         parameters=[
             params_file,
@@ -128,12 +189,20 @@ def generate_launch_description():
             depth_topic_arg,
             camera_frame_arg,
             target_frame_arg,
+            camera_tf_child_frame_arg,
+            camera_tf_x_arg,
+            camera_tf_y_arg,
+            camera_tf_z_arg,
+            camera_tf_roll_arg,
+            camera_tf_pitch_arg,
+            camera_tf_yaw_arg,
             snapshot_duration_arg,
             enable_tuning_window_arg,
             tuning_config_path_arg,
             launch_camera_arg,
             realsense_launch,
-            white_patch_detector,
+            camera_static_tf,
+            green_nub_detector,
             nub_snapshot,
         ]
     )

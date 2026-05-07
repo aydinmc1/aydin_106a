@@ -3,7 +3,7 @@
 <package format="3">
   <name>aydin_v2</name>
   <version>0.1.0</version>
-  <description>Computer vision nodes for detecting white patches in camera images.</description>
+  <description>Computer vision nodes for detecting green game-piece nubs.</description>
   <maintainer email="you@example.com">Your Name</maintainer>
   <license>MIT</license>
 

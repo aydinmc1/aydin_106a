@@ -20,7 +20,7 @@ class NubSnapshotNode(Node):
             "live_nub_detection_topic", "/aydin_v2/live_nubs_v2/detections"
         )
         self.declare_parameter(
-            "debug_image_topic", "/aydin_v2/white_patches/debug_image_v2"
+            "debug_image_topic", "/aydin_v2/green_nubs/debug_image_v2"
         )
         self.declare_parameter("target_frame", "base_link")
         self.declare_parameter("snapshot_duration", 3.0)

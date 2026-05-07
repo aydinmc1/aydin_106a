@@ -50,14 +50,14 @@ def quaternion_from_matrix(matrix):
     return q
 
 
-class WhitePatchDetectorNode(Node):
+class GreenNubDetectorNode(Node):
     def __init__(self):
-        super().__init__("white_patch_detector_node_v2")
+        super().__init__("green_nub_detector_node_v2")
 
         self.declare_parameter("image_topic", "/camera/camera/color/image_raw")
         self.declare_parameter("camera_info_topic", "/camera/camera/color/camera_info")
         self.declare_parameter(
-            "debug_image_topic", "/aydin_v2/white_patches/debug_image_v2"
+            "debug_image_topic", "/aydin_v2/green_nubs/debug_image_v2"
         )
         self.declare_parameter("aruco_dictionary_id", "DICT_5X5_250")
         self.declare_parameter("aruco_marker_id", 1)
@@ -76,12 +76,6 @@ class WhitePatchDetectorNode(Node):
             "live_nub_detection_topic", "/aydin_v2/live_nubs_v2/detections"
         )
         self.declare_parameter("snapshot_service_name", "/take_nub_snapshot_v2")
-        self.declare_parameter("white_min_value", 200)
-        self.declare_parameter("white_max_saturation", 45)
-        self.declare_parameter("min_patch_area", 150.0)
-        self.declare_parameter("max_patch_area", 0.0)
-        self.declare_parameter("blur_kernel_size", 5)
-        self.declare_parameter("morph_kernel_size", 5)
         self.declare_parameter("green_h_min", 35)
         self.declare_parameter("green_h_max", 85)
         self.declare_parameter("green_s_min", 80)
@@ -95,7 +89,7 @@ class WhitePatchDetectorNode(Node):
         self.declare_parameter("green_morph_kernel_size", 3)
         self.declare_parameter("enable_tuning_window", True)
         self.declare_parameter(
-            "tuning_config_path", "white_detection_params_v2.json"
+            "tuning_config_path", "green_detection_params_v2.json"
         )
 
         self.bridge = CvBridge()
@@ -123,12 +117,11 @@ class WhitePatchDetectorNode(Node):
         self.tuning_config_path = os.path.expanduser(
             self.get_parameter("tuning_config_path").value
         )
-        self.tuning_window_name = "aydin_v2 white detection tuning"
+        self.tuning_window_name = "aydin_v2 green nub tuning"
         self.tuning_window_ready = False
         self.save_requested = False
         self.save_trackbar_armed = False
         self.snapshot_trackbar_armed = False
-        self.white_settings = self.load_white_settings()
         self.green_settings = self.load_green_settings()
         self.green_nub_detector = GreenNubDetector(self.green_settings)
         self.snapshot_request_pending = False
@@ -193,7 +186,7 @@ class WhitePatchDetectorNode(Node):
         self.get_logger().info(f"Drawing axes for ArUco marker {self.aruco_marker_id}")
         if self.enable_tuning_window:
             self.get_logger().info(
-                f"Loading/saving white tuning at {self.tuning_config_path}"
+                f"Loading/saving green tuning at {self.tuning_config_path}"
             )
 
     def camera_info_callback(self, msg):
@@ -217,55 +210,9 @@ class WhitePatchDetectorNode(Node):
                 self.get_logger().error(f"Disabling tuning window: {exc}")
                 self.enable_tuning_window = False
 
-        mask = self.find_white_mask(cv_image)
-        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-
         debug_image = cv_image.copy()
-        patch_count = 0
-
-        for contour in contours:
-            area = cv2.contourArea(contour)
-            min_area = float(self.white_settings["min_patch_area"])
-            max_area = float(self.white_settings["max_patch_area"])
-            if area < min_area:
-                continue
-            if max_area > 0 and area > max_area:
-                continue
-
-            moments = cv2.moments(contour)
-            if moments["m00"] == 0:
-                continue
-
-            center_x = int(moments["m10"] / moments["m00"])
-            center_y = int(moments["m01"] / moments["m00"])
-
-            if self.camera_matrix is not None:
-                pt = self.get_3d_position(center_x, center_y, depth_image)
-                if pt is not None:
-                    self.get_logger().debug(
-                        f"Piece at {self.target_frame}: "
-                        f"x={pt.x:.3f} y={pt.y:.3f} z={pt.z:.3f}"
-                    )
-                    cv2.putText(
-                        debug_image,
-                        f"{pt.x:.2f},{pt.y:.2f},{pt.z:.2f}",
-                        (center_x + 10, center_y),
-                        cv2.FONT_HERSHEY_SIMPLEX,
-                        0.5,
-                        (0, 255, 255),
-                        1,
-                    )
-                    self.publish_point_transform(
-                        f"piece_v2_{patch_count}",
-                        pt,
-                        msg.header.stamp,
-                    )
-
-            cv2.drawContours(debug_image, [contour], -1, (0, 255, 0), 2)
-            cv2.circle(debug_image, (center_x, center_y), 5, (0, 0, 255), -1)
-            patch_count += 1
-
-        green_candidates = self.green_nub_detector.detect(cv_image)
+        green_mask = self.green_nub_detector.find_mask(cv_image)
+        green_candidates = self.green_nub_detector.detect_from_mask(green_mask)
         nub_count = 0
         live_nub_poses = PoseArray()
         live_nub_poses.header = msg.header
@@ -321,59 +268,19 @@ class WhitePatchDetectorNode(Node):
         self.process_aruco_marker(cv_image, debug_image, msg.header.stamp)
 
         if self.enable_tuning_window:
-            self.show_tuning_window(debug_image, mask)
+            self.show_tuning_window(debug_image, green_mask)
             if self.save_requested:
-                self.save_white_settings()
+                self.save_green_settings()
                 self.save_requested = False
 
         debug_msg = self.bridge.cv2_to_imgmsg(debug_image, encoding="bgr8")
         debug_msg.header = msg.header
         self.debug_image_pub.publish(debug_msg)
 
-        self.get_logger().debug(f"Detected {patch_count} white patches")
-
-    def find_white_mask(self, cv_image):
-        blur_kernel_size = self.get_odd_kernel_size(
-            int(self.white_settings["blur_kernel_size"])
-        )
-        morph_kernel_size = self.get_odd_kernel_size(
-            int(self.white_settings["morph_kernel_size"])
-        )
-
-        working_image = cv_image
-        if blur_kernel_size > 1:
-            working_image = cv2.GaussianBlur(
-                working_image, (blur_kernel_size, blur_kernel_size), 0
-            )
-
-        hsv_image = cv2.cvtColor(working_image, cv2.COLOR_BGR2HSV)
-        lower_white = np.array(
-            [
-                int(self.white_settings["h_min"]),
-                int(self.white_settings["s_min"]),
-                int(self.white_settings["v_min"]),
-            ],
-            dtype=np.uint8,
-        )
-        upper_white = np.array(
-            [
-                int(self.white_settings["h_max"]),
-                int(self.white_settings["s_max"]),
-                int(self.white_settings["v_max"]),
-            ],
-            dtype=np.uint8,
-        )
-        mask = cv2.inRange(hsv_image, lower_white, upper_white)
-
-        if morph_kernel_size > 1:
-            kernel = np.ones((morph_kernel_size, morph_kernel_size), dtype=np.uint8)
-            mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
-            mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
-
-        return mask
+        self.get_logger().debug(f"Detected {len(green_candidates)} green nubs")
 
     def load_green_settings(self):
-        return {
+        defaults = {
             "green_h_min": int(self.get_parameter("green_h_min").value),
             "green_h_max": int(self.get_parameter("green_h_max").value),
             "green_s_min": int(self.get_parameter("green_s_min").value),
@@ -393,20 +300,6 @@ class WhitePatchDetectorNode(Node):
             ),
         }
 
-    def load_white_settings(self):
-        defaults = {
-            "h_min": 0,
-            "h_max": 179,
-            "s_min": 0,
-            "s_max": int(self.get_parameter("white_max_saturation").value),
-            "v_min": int(self.get_parameter("white_min_value").value),
-            "v_max": 255,
-            "min_patch_area": int(self.get_parameter("min_patch_area").value),
-            "max_patch_area": int(self.get_parameter("max_patch_area").value),
-            "blur_kernel_size": int(self.get_parameter("blur_kernel_size").value),
-            "morph_kernel_size": int(self.get_parameter("morph_kernel_size").value),
-        }
-
         if not os.path.exists(self.tuning_config_path):
             return defaults
 
@@ -422,12 +315,12 @@ class WhitePatchDetectorNode(Node):
         settings = defaults.copy()
         for key in settings:
             if key in loaded:
-                settings[key] = int(loaded[key])
+                settings[key] = loaded[key]
 
-        self.get_logger().info(f"Loaded white tuning from {self.tuning_config_path}")
-        return self.clamp_white_settings(settings)
+        self.get_logger().info(f"Loaded green tuning from {self.tuning_config_path}")
+        return self.clamp_green_settings(settings)
 
-    def save_white_settings(self):
+    def save_green_settings(self):
         config_dir = os.path.dirname(os.path.abspath(self.tuning_config_path))
         if config_dir:
             os.makedirs(config_dir, exist_ok=True)
@@ -435,44 +328,55 @@ class WhitePatchDetectorNode(Node):
         try:
             with open(self.tuning_config_path, "w", encoding="utf-8") as config_file:
                 json.dump(
-                    self.clamp_white_settings(self.white_settings),
+                    self.clamp_green_settings(self.green_settings),
                     config_file,
                     indent=2,
                 )
                 config_file.write("\n")
         except OSError as exc:
             self.get_logger().error(
-                f"Could not save white tuning to {self.tuning_config_path}: {exc}"
+                f"Could not save green tuning to {self.tuning_config_path}: {exc}"
             )
             return
 
-        self.get_logger().info(f"Saved white tuning to {self.tuning_config_path}")
+        self.get_logger().info(f"Saved green tuning to {self.tuning_config_path}")
 
-    def clamp_white_settings(self, settings):
+    def clamp_green_settings(self, settings):
         limits = {
-            "h_min": (0, 179),
-            "h_max": (0, 179),
-            "s_min": (0, 255),
-            "s_max": (0, 255),
-            "v_min": (0, 255),
-            "v_max": (0, 255),
-            "min_patch_area": (0, 200000),
-            "max_patch_area": (0, 200000),
-            "blur_kernel_size": (0, 31),
-            "morph_kernel_size": (0, 31),
+            "green_h_min": (0, 179, int),
+            "green_h_max": (0, 179, int),
+            "green_s_min": (0, 255, int),
+            "green_s_max": (0, 255, int),
+            "green_v_min": (0, 255, int),
+            "green_v_max": (0, 255, int),
+            "green_min_area": (0, 200000, float),
+            "green_max_area": (0, 200000, float),
+            "green_min_circularity": (0.0, 1.0, float),
+            "green_blur_kernel_size": (0, 31, int),
+            "green_morph_kernel_size": (0, 31, int),
         }
 
         clamped = {}
         for key, value in settings.items():
-            low, high = limits[key]
-            clamped[key] = max(low, min(high, int(value)))
+            low, high, value_type = limits[key]
+            numeric_value = max(low, min(high, float(value)))
+            clamped[key] = value_type(numeric_value)
 
-        if clamped["h_min"] > clamped["h_max"]:
-            clamped["h_min"], clamped["h_max"] = clamped["h_max"], clamped["h_min"]
-        if clamped["s_min"] > clamped["s_max"]:
-            clamped["s_min"], clamped["s_max"] = clamped["s_max"], clamped["s_min"]
-        if clamped["v_min"] > clamped["v_max"]:
-            clamped["v_min"], clamped["v_max"] = clamped["v_max"], clamped["v_min"]
+        if clamped["green_h_min"] > clamped["green_h_max"]:
+            clamped["green_h_min"], clamped["green_h_max"] = (
+                clamped["green_h_max"],
+                clamped["green_h_min"],
+            )
+        if clamped["green_s_min"] > clamped["green_s_max"]:
+            clamped["green_s_min"], clamped["green_s_max"] = (
+                clamped["green_s_max"],
+                clamped["green_s_min"],
+            )
+        if clamped["green_v_min"] > clamped["green_v_max"]:
+            clamped["green_v_min"], clamped["green_v_max"] = (
+                clamped["green_v_max"],
+                clamped["green_v_min"],
+            )
         return clamped
 
     def ensure_tuning_window(self):
@@ -483,30 +387,31 @@ class WhitePatchDetectorNode(Node):
         cv2.resizeWindow(self.tuning_window_name, 1280, 720)
 
         trackbars = {
-            "H min": ("h_min", 179),
-            "H max": ("h_max", 179),
-            "S min": ("s_min", 255),
-            "S max": ("s_max", 255),
-            "V min": ("v_min", 255),
-            "V max": ("v_max", 255),
-            "Min area": ("min_patch_area", 200000),
-            "Max area": ("max_patch_area", 200000),
-            "Blur": ("blur_kernel_size", 31),
-            "Morph": ("morph_kernel_size", 31),
+            "H min": ("green_h_min", 179, 1.0),
+            "H max": ("green_h_max", 179, 1.0),
+            "S min": ("green_s_min", 255, 1.0),
+            "S max": ("green_s_max", 255, 1.0),
+            "V min": ("green_v_min", 255, 1.0),
+            "V max": ("green_v_max", 255, 1.0),
+            "Min area": ("green_min_area", 200000, 1.0),
+            "Max area": ("green_max_area", 200000, 1.0),
+            "Min circ x100": ("green_min_circularity", 100, 100.0),
+            "Blur": ("green_blur_kernel_size", 31, 1.0),
+            "Morph": ("green_morph_kernel_size", 31, 1.0),
         }
 
-        for label, (key, maximum) in trackbars.items():
+        for label, (key, maximum, scale) in trackbars.items():
             cv2.createTrackbar(
                 label,
                 self.tuning_window_name,
-                int(self.white_settings[key]),
+                int(round(float(self.green_settings[key]) * scale)),
                 maximum,
                 self.noop_trackbar_callback,
             )
 
         try:
             cv2.createButton(
-                "Save white_detection_params_v2.json",
+                "Save green_detection_params_v2.json",
                 self.tuning_button_callback,
                 None,
                 cv2.QT_PUSH_BUTTON,
@@ -544,24 +449,26 @@ class WhitePatchDetectorNode(Node):
 
     def read_tuning_window(self):
         trackbars = {
-            "H min": "h_min",
-            "H max": "h_max",
-            "S min": "s_min",
-            "S max": "s_max",
-            "V min": "v_min",
-            "V max": "v_max",
-            "Min area": "min_patch_area",
-            "Max area": "max_patch_area",
-            "Blur": "blur_kernel_size",
-            "Morph": "morph_kernel_size",
+            "H min": ("green_h_min", 1.0),
+            "H max": ("green_h_max", 1.0),
+            "S min": ("green_s_min", 1.0),
+            "S max": ("green_s_max", 1.0),
+            "V min": ("green_v_min", 1.0),
+            "V max": ("green_v_max", 1.0),
+            "Min area": ("green_min_area", 1.0),
+            "Max area": ("green_max_area", 1.0),
+            "Min circ x100": ("green_min_circularity", 100.0),
+            "Blur": ("green_blur_kernel_size", 1.0),
+            "Morph": ("green_morph_kernel_size", 1.0),
         }
 
-        for label, key in trackbars.items():
-            self.white_settings[key] = cv2.getTrackbarPos(
-                label, self.tuning_window_name
+        for label, (key, scale) in trackbars.items():
+            self.green_settings[key] = (
+                cv2.getTrackbarPos(label, self.tuning_window_name) / scale
             )
 
-        self.white_settings = self.clamp_white_settings(self.white_settings)
+        self.green_settings = self.clamp_green_settings(self.green_settings)
+        self.green_nub_detector.settings = self.green_settings
 
         if self.save_trackbar_armed:
             save_value = cv2.getTrackbarPos("Save settings", self.tuning_window_name)
@@ -575,8 +482,8 @@ class WhitePatchDetectorNode(Node):
                 self.call_snapshot_service()
                 cv2.setTrackbarPos("Take snapshot", self.tuning_window_name, 0)
 
-    def show_tuning_window(self, debug_image, mask):
-        mask_bgr = cv2.cvtColor(mask, cv2.COLOR_GRAY2BGR)
+    def show_tuning_window(self, debug_image, green_mask):
+        mask_bgr = cv2.cvtColor(green_mask, cv2.COLOR_GRAY2BGR)
         if self.snapshot_request_pending:
             status = "Snapshot request pending"
         elif self.snapshot_client.service_is_ready():
@@ -586,7 +493,7 @@ class WhitePatchDetectorNode(Node):
 
         cv2.putText(
             debug_image,
-            status,
+            f"Camera view | {status}",
             (12, 30),
             cv2.FONT_HERSHEY_SIMPLEX,
             0.8,
@@ -595,7 +502,7 @@ class WhitePatchDetectorNode(Node):
         )
         cv2.putText(
             mask_bgr,
-            "Mask preview",
+            "Green mask",
             (12, 30),
             cv2.FONT_HERSHEY_SIMPLEX,
             0.8,
@@ -778,21 +685,14 @@ class WhitePatchDetectorNode(Node):
             return cv2.aruco.DetectorParameters_create()
         return cv2.aruco.DetectorParameters()
 
-    def get_odd_kernel_size(self, kernel_size):
-        if kernel_size < 1:
-            return 1
-        if kernel_size % 2 == 0:
-            return kernel_size + 1
-        return kernel_size
-
     def get_3d_position(self, u, v, depth_image):
         # sample 7x7 neighborhood
         h, w = depth_image.shape
         u, v = int(u), int(v)
         u1, u2 = max(0, u - 3), min(w, u + 4)
         v1, v2 = max(0, v - 3), min(h, v + 4)
-        patch = depth_image[v1:v2, u1:u2]
-        nonzero = patch[patch > 0]
+        depth_window = depth_image[v1:v2, u1:u2]
+        nonzero = depth_window[depth_window > 0]
         if len(nonzero) == 0:
             return None
         z = float(np.median(nonzero)) / 1000.0
@@ -838,7 +738,7 @@ class WhitePatchDetectorNode(Node):
 
 def main(args=None):
     rclpy.init(args=args)
-    node = WhitePatchDetectorNode()
+    node = GreenNubDetectorNode()
 
     try:
         rclpy.spin(node)

@@ -18,14 +18,14 @@ setup(
     zip_safe=True,
     maintainer="Your Name",
     maintainer_email="you@example.com",
-    description="Computer vision nodes for detecting white patches in camera images.",
+    description="Computer vision nodes for detecting green game-piece nubs.",
     license="MIT",
     tests_require=["pytest"],
     entry_points={
         "console_scripts": [
             "example_node = aydin_v2.example_node:main",
+            "green_nub_detector_node_v2 = aydin_v2.green_nub_detector_node:main",
             "nub_snapshot_node_v2 = aydin_v2.nub_snapshot_node:main",
-            "white_patch_detector_node_v2 = aydin_v2.white_patch_detector_node:main",
         ],
     },
 )

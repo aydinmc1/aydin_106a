@@ -45,7 +45,9 @@ class GreenNubDetector:
         self.settings = settings
 
     def detect(self, cv_image):
-        green_mask = self.find_mask(cv_image)
+        return self.detect_from_mask(self.find_mask(cv_image))
+
+    def detect_from_mask(self, green_mask):
         green_contours, _ = cv2.findContours(
             green_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
         )

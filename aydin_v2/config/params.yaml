@@ -3,7 +3,7 @@ white_patch_detector_node:
     image_topic: /camera/camera/color/image_raw
     camera_info_topic: /camera/camera/color/camera_info
     debug_image_topic: /aydin_v2/white_patches/debug_image
-    aruco_dictionary_id: DICT_5X5_250
+    aruco_dictionary_id: DICT_4X4_50
     aruco_marker_id: 1
     aruco_marker_size: 0.15
     aruco_axis_length: 0.075

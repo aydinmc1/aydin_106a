@@ -5,10 +5,19 @@ white_patch_detector_node:
     debug_image_topic: /aydin_v2/white_patches/debug_image
     aruco_dictionary_id: DICT_4X4_50
     aruco_marker_id: 1
-    aruco_marker_size: 0.15
-    aruco_axis_length: 0.075
+    aruco_marker_size: 0.04
+    aruco_axis_length: 0.02
     aruco_pose_topic: aruco_poses
     camera_frame: camera_color_optical_frame
+    depth_topic: /camera/camera/aligned_depth_to_color/image_raw
+    target_frame: base_link
+    snapshot_duration: 3.0
+    snapshot_expected_nubs: 11
+    snapshot_cluster_radius: 0.025
+    snapshot_min_samples: 5
+    snapshot_pose_topic: /aydin_v2/nub_snapshot/poses
+    snapshot_marker_topic: /aydin_v2/nub_snapshot/markers
+    snapshot_frame_prefix: snapshot_nub
     white_min_value: 200
     white_max_saturation: 45
     min_patch_area: 150.0

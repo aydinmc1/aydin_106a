@@ -29,10 +29,25 @@ def generate_launch_description():
         default_value="/camera/camera/color/camera_info",
         description="Input camera calibration topic.",
     )
+    depth_topic_arg = DeclareLaunchArgument(
+        "depth_topic",
+        default_value="/camera/camera/aligned_depth_to_color/image_raw",
+        description="Aligned depth image topic.",
+    )
     camera_frame_arg = DeclareLaunchArgument(
         "camera_frame",
         default_value="camera_color_optical_frame",
         description="Camera frame used for ArUco pose and TF outputs.",
+    )
+    target_frame_arg = DeclareLaunchArgument(
+        "target_frame",
+        default_value="base_link",
+        description="Frame used for piece and snapshot nub outputs.",
+    )
+    snapshot_duration_arg = DeclareLaunchArgument(
+        "snapshot_duration",
+        default_value="3.0",
+        description="Seconds of green nub observations to cluster.",
     )
     enable_tuning_window_arg = DeclareLaunchArgument(
         "enable_tuning_window",
@@ -59,6 +74,9 @@ def generate_launch_description():
             )
         ),
         condition=IfCondition(LaunchConfiguration("launch_camera")),
+        launch_arguments={
+            "align_depth.enable": "true",
+        }.items(),
     )
 
     white_patch_detector = Node(
@@ -71,8 +89,14 @@ def generate_launch_description():
             {
                 "image_topic": LaunchConfiguration("image_topic"),
                 "camera_info_topic": LaunchConfiguration("camera_info_topic"),
+                "depth_topic": LaunchConfiguration("depth_topic"),
                 "debug_image_topic": LaunchConfiguration("debug_image_topic"),
                 "camera_frame": LaunchConfiguration("camera_frame"),
+                "target_frame": LaunchConfiguration("target_frame"),
+                "snapshot_duration": ParameterValue(
+                    LaunchConfiguration("snapshot_duration"),
+                    value_type=float,
+                ),
                 "enable_tuning_window": ParameterValue(
                     LaunchConfiguration("enable_tuning_window"),
                     value_type=bool,
@@ -87,7 +111,10 @@ def generate_launch_description():
             image_topic_arg,
             debug_image_topic_arg,
             camera_info_topic_arg,
+            depth_topic_arg,
             camera_frame_arg,
+            target_frame_arg,
+            snapshot_duration_arg,
             enable_tuning_window_arg,
             tuning_config_path_arg,
             launch_camera_arg,

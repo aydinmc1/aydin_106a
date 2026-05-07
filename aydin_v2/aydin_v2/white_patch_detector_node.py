@@ -4,7 +4,7 @@ import rclpy
 from cv_bridge import CvBridge
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
-from sensor_msgs.msg import Image
+from sensor_msgs.msg import CameraInfo, Image
 
 
 class WhitePatchDetectorNode(Node):
@@ -12,9 +12,14 @@ class WhitePatchDetectorNode(Node):
         super().__init__("white_patch_detector_node")
 
         self.declare_parameter("image_topic", "/camera/camera/color/image_raw")
+        self.declare_parameter("camera_info_topic", "/camera/camera/color/camera_info")
         self.declare_parameter(
             "debug_image_topic", "/aydin_v2/white_patches/debug_image"
         )
+        self.declare_parameter("aruco_dictionary_id", "DICT_5X5_250")
+        self.declare_parameter("aruco_marker_id", 1)
+        self.declare_parameter("aruco_marker_size", 0.15)
+        self.declare_parameter("aruco_axis_length", 0.075)
         self.declare_parameter("white_min_value", 200)
         self.declare_parameter("white_max_saturation", 45)
         self.declare_parameter("min_patch_area", 150.0)
@@ -23,7 +28,17 @@ class WhitePatchDetectorNode(Node):
 
         self.bridge = CvBridge()
         self.image_topic = self.get_parameter("image_topic").value
+        self.camera_info_topic = self.get_parameter("camera_info_topic").value
         self.debug_image_topic = self.get_parameter("debug_image_topic").value
+        self.aruco_marker_id = int(self.get_parameter("aruco_marker_id").value)
+        self.aruco_marker_size = float(self.get_parameter("aruco_marker_size").value)
+        self.aruco_axis_length = float(self.get_parameter("aruco_axis_length").value)
+        self.camera_matrix = None
+        self.distortion = None
+
+        dictionary_name = self.get_parameter("aruco_dictionary_id").value
+        self.aruco_dictionary = self.get_aruco_dictionary(dictionary_name)
+        self.aruco_parameters = self.create_aruco_parameters()
 
         self.image_sub = self.create_subscription(
             Image,
@@ -31,10 +46,23 @@ class WhitePatchDetectorNode(Node):
             self.image_callback,
             qos_profile_sensor_data,
         )
+        self.camera_info_sub = self.create_subscription(
+            CameraInfo,
+            self.camera_info_topic,
+            self.camera_info_callback,
+            qos_profile_sensor_data,
+        )
         self.debug_image_pub = self.create_publisher(Image, self.debug_image_topic, 10)
 
         self.get_logger().info(f"Subscribing to {self.image_topic}")
+        self.get_logger().info(f"Subscribing to {self.camera_info_topic}")
         self.get_logger().info(f"Publishing debug images to {self.debug_image_topic}")
+        self.get_logger().info(f"Drawing axes for ArUco marker {self.aruco_marker_id}")
+
+    def camera_info_callback(self, msg):
+        self.camera_matrix = np.reshape(np.array(msg.k), (3, 3))
+        self.distortion = np.array(msg.d)
+        self.destroy_subscription(self.camera_info_sub)
 
     def image_callback(self, msg):
         try:
@@ -66,6 +94,8 @@ class WhitePatchDetectorNode(Node):
             cv2.circle(debug_image, (center_x, center_y), 5, (0, 0, 255), -1)
             patch_count += 1
 
+        self.draw_aruco_axes(debug_image)
+
         debug_msg = self.bridge.cv2_to_imgmsg(debug_image, encoding="bgr8")
         debug_msg.header = msg.header
         self.debug_image_pub.publish(debug_msg)
@@ -95,6 +125,71 @@ class WhitePatchDetectorNode(Node):
             mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
 
         return mask
+
+    def draw_aruco_axes(self, debug_image):
+        if self.camera_matrix is None or self.distortion is None:
+            self.get_logger().debug("No camera info has been received")
+            return
+
+        gray_image = cv2.cvtColor(debug_image, cv2.COLOR_BGR2GRAY)
+        corners, marker_ids, _ = cv2.aruco.detectMarkers(
+            gray_image,
+            self.aruco_dictionary,
+            parameters=self.aruco_parameters,
+        )
+
+        if marker_ids is None:
+            return
+
+        cv2.aruco.drawDetectedMarkers(debug_image, corners, marker_ids)
+        for index, marker_id in enumerate(marker_ids.flatten()):
+            if marker_id != self.aruco_marker_id:
+                continue
+
+            rvecs, tvecs, _ = cv2.aruco.estimatePoseSingleMarkers(
+                [corners[index]],
+                self.aruco_marker_size,
+                self.camera_matrix,
+                self.distortion,
+            )
+            self.draw_frame_axes(debug_image, rvecs[0], tvecs[0])
+            return
+
+    def draw_frame_axes(self, image, rvec, tvec):
+        if hasattr(cv2, "drawFrameAxes"):
+            cv2.drawFrameAxes(
+                image,
+                self.camera_matrix,
+                self.distortion,
+                rvec,
+                tvec,
+                self.aruco_axis_length,
+            )
+        else:
+            cv2.aruco.drawAxis(
+                image,
+                self.camera_matrix,
+                self.distortion,
+                rvec,
+                tvec,
+                self.aruco_axis_length,
+            )
+
+    def get_aruco_dictionary(self, dictionary_name):
+        try:
+            dictionary_id = getattr(cv2.aruco, dictionary_name)
+        except AttributeError:
+            self.get_logger().error(f"Invalid aruco_dictionary_id: {dictionary_name}")
+            dictionary_id = cv2.aruco.DICT_5X5_250
+
+        if hasattr(cv2.aruco, "getPredefinedDictionary"):
+            return cv2.aruco.getPredefinedDictionary(dictionary_id)
+        return cv2.aruco.Dictionary_get(dictionary_id)
+
+    def create_aruco_parameters(self):
+        if hasattr(cv2.aruco, "DetectorParameters_create"):
+            return cv2.aruco.DetectorParameters_create()
+        return cv2.aruco.DetectorParameters()
 
     def get_odd_kernel_size(self, parameter_name):
         kernel_size = int(self.get_parameter(parameter_name).value)

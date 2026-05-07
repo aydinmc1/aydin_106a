@@ -23,6 +23,11 @@ def generate_launch_description():
         default_value="/aydin_v2/white_patches/debug_image",
         description="Annotated debug image output topic.",
     )
+    camera_info_topic_arg = DeclareLaunchArgument(
+        "camera_info_topic",
+        default_value="/camera/camera/color/camera_info",
+        description="Input camera calibration topic.",
+    )
     launch_camera_arg = DeclareLaunchArgument(
         "launch_camera",
         default_value="true",
@@ -49,6 +54,7 @@ def generate_launch_description():
             params_file,
             {
                 "image_topic": LaunchConfiguration("image_topic"),
+                "camera_info_topic": LaunchConfiguration("camera_info_topic"),
                 "debug_image_topic": LaunchConfiguration("debug_image_topic"),
             },
         ],
@@ -58,6 +64,7 @@ def generate_launch_description():
         [
             image_topic_arg,
             debug_image_topic_arg,
+            camera_info_topic_arg,
             launch_camera_arg,
             realsense_launch,
             white_patch_detector,

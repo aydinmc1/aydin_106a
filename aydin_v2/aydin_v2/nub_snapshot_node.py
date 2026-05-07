@@ -67,6 +67,8 @@ class NubSnapshotNode(Node):
         self.latest_snapshot_clusters = []
         self.latest_pose_array = None
         self.latest_point_stamps = []
+        self.snapshot_window_name = "aydin_v2 nub snapshot result"
+        self.snapshot_popup_open = False
 
         self.detections_sub = self.create_subscription(
             Float32MultiArray,
@@ -164,6 +166,7 @@ class NubSnapshotNode(Node):
 
         self.publish_latest_snapshot_transforms()
         self.publish_latest_snapshot_messages()
+        self.update_snapshot_popup_window()
 
     def finalize_snapshot(self):
         clusters = self.cluster_snapshot_samples()
@@ -352,10 +355,39 @@ class NubSnapshotNode(Node):
             )
 
         try:
-            cv2.imshow("aydin_v2 nub snapshot result", snapshot_image)
+            cv2.namedWindow(self.snapshot_window_name, cv2.WINDOW_NORMAL)
+            cv2.imshow(self.snapshot_window_name, snapshot_image)
             cv2.waitKey(1)
+            self.snapshot_popup_open = True
         except cv2.error as exc:
+            self.snapshot_popup_open = False
             self.get_logger().warn(f"Could not show snapshot popup: {exc}")
+
+    def update_snapshot_popup_window(self):
+        if not self.snapshot_popup_open:
+            return
+
+        try:
+            window_visible = cv2.getWindowProperty(
+                self.snapshot_window_name,
+                cv2.WND_PROP_VISIBLE,
+            )
+            if window_visible < 1:
+                self.snapshot_popup_open = False
+                return
+
+            key = cv2.waitKey(1) & 0xFF
+            if key in (ord("q"), 27):
+                self.close_snapshot_popup()
+        except cv2.error:
+            self.snapshot_popup_open = False
+
+    def close_snapshot_popup(self):
+        try:
+            cv2.destroyWindow(self.snapshot_window_name)
+        except cv2.error:
+            pass
+        self.snapshot_popup_open = False
 
 
 def main(args=None):
@@ -367,10 +399,7 @@ def main(args=None):
     except KeyboardInterrupt:
         pass
     finally:
-        try:
-            cv2.destroyWindow("aydin_v2 nub snapshot result")
-        except cv2.error:
-            pass
+        node.close_snapshot_popup()
         node.destroy_node()
         rclpy.shutdown()
 

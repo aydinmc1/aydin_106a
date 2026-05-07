@@ -44,19 +44,24 @@ def generate_launch_description():
         default_value="base_link",
         description="Frame used for live and snapshot nub outputs.",
     )
+    camera_tf_parent_frame_arg = DeclareLaunchArgument(
+        "camera_tf_parent_frame",
+        default_value="wrist_3_link",
+        description="Robot frame that the camera is mounted to.",
+    )
     camera_tf_child_frame_arg = DeclareLaunchArgument(
         "camera_tf_child_frame",
         default_value="camera_color_optical_frame",
-        description="Camera optical frame connected to target_frame by a static transform.",
+        description="Camera optical frame connected to the camera mount frame.",
     )
     camera_tf_x_arg = DeclareLaunchArgument(
         "camera_tf_x",
-        default_value="0.0",
+        default_value="-0.025",
         description="Static camera transform x offset in meters.",
     )
     camera_tf_y_arg = DeclareLaunchArgument(
         "camera_tf_y",
-        default_value="0.0",
+        default_value="0.13",
         description="Static camera transform y offset in meters.",
     )
     camera_tf_z_arg = DeclareLaunchArgument(
@@ -134,7 +139,7 @@ def generate_launch_description():
             "--yaw",
             LaunchConfiguration("camera_tf_yaw"),
             "--frame-id",
-            LaunchConfiguration("target_frame"),
+            LaunchConfiguration("camera_tf_parent_frame"),
             "--child-frame-id",
             LaunchConfiguration("camera_tf_child_frame"),
         ],
@@ -189,6 +194,7 @@ def generate_launch_description():
             depth_topic_arg,
             camera_frame_arg,
             target_frame_arg,
+            camera_tf_parent_frame_arg,
             camera_tf_child_frame_arg,
             camera_tf_x_arg,
             camera_tf_y_arg,

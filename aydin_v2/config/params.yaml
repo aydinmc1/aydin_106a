@@ -56,7 +56,7 @@ nub_path_executor_node_v2:
     end_effector_frame: wrist_3_link
     move_group_name: ur_manipulator
     planning_link_name: wrist_3_link
-    hover_z_offset: 0.10
+    hover_z_offset: 0.185
     curve_samples_per_segment: 8
     cartesian_max_step: 0.01
     cartesian_jump_threshold: 0.0

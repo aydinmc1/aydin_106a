@@ -111,7 +111,7 @@ def generate_launch_description():
     )
     hover_z_offset_arg = DeclareLaunchArgument(
         "hover_z_offset",
-        default_value="0.10",
+        default_value="0.185",
         description="Meters above each snapshot nub used for path execution.",
     )
     shutdown_path_executor_after_execution_arg = DeclareLaunchArgument(

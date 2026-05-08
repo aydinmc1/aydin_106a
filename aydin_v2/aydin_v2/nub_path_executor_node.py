@@ -33,7 +33,7 @@ class NubPathExecutorNode(Node):
         self.declare_parameter("end_effector_frame", "wrist_3_link")
         self.declare_parameter("move_group_name", "ur_manipulator")
         self.declare_parameter("planning_link_name", "wrist_3_link")
-        self.declare_parameter("hover_z_offset", 0.10)
+        self.declare_parameter("hover_z_offset", 0.185)
         self.declare_parameter("curve_samples_per_segment", 8)
         self.declare_parameter("cartesian_max_step", 0.01)
         self.declare_parameter("cartesian_jump_threshold", 0.0)

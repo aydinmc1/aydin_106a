@@ -104,6 +104,21 @@ def generate_launch_description():
         default_value="true",
         description="Start the RealSense camera driver.",
     )
+    launch_path_executor_arg = DeclareLaunchArgument(
+        "launch_path_executor",
+        default_value="true",
+        description="Start the MoveIt-backed green nub path executor.",
+    )
+    hover_z_offset_arg = DeclareLaunchArgument(
+        "hover_z_offset",
+        default_value="0.10",
+        description="Meters above each snapshot nub used for path execution.",
+    )
+    shutdown_path_executor_after_execution_arg = DeclareLaunchArgument(
+        "shutdown_path_executor_after_execution",
+        default_value="true",
+        description="Shutdown the path executor after it completes one path.",
+    )
 
     realsense_launch = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
@@ -186,6 +201,28 @@ def generate_launch_description():
         ],
     )
 
+    nub_path_executor = Node(
+        package="aydin_v2",
+        executable="nub_path_executor_node_v2",
+        name="nub_path_executor_node_v2",
+        output="screen",
+        condition=IfCondition(LaunchConfiguration("launch_path_executor")),
+        parameters=[
+            params_file,
+            {
+                "target_frame": LaunchConfiguration("target_frame"),
+                "hover_z_offset": ParameterValue(
+                    LaunchConfiguration("hover_z_offset"),
+                    value_type=float,
+                ),
+                "shutdown_after_execution": ParameterValue(
+                    LaunchConfiguration("shutdown_path_executor_after_execution"),
+                    value_type=bool,
+                ),
+            },
+        ],
+    )
+
     return LaunchDescription(
         [
             image_topic_arg,
@@ -206,9 +243,13 @@ def generate_launch_description():
             enable_tuning_window_arg,
             tuning_config_path_arg,
             launch_camera_arg,
+            launch_path_executor_arg,
+            hover_z_offset_arg,
+            shutdown_path_executor_after_execution_arg,
             realsense_launch,
             camera_static_tf,
             green_nub_detector,
             nub_snapshot,
+            nub_path_executor,
         ]
     )

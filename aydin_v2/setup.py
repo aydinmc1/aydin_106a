@@ -26,6 +26,7 @@ setup(
             "example_node = aydin_v2.example_node:main",
             "green_nub_detector_node_v2 = aydin_v2.green_nub_detector_node:main",
             "nub_snapshot_node_v2 = aydin_v2.nub_snapshot_node:main",
+            "nub_path_executor_node_v2 = aydin_v2.nub_path_executor_node:main",
         ],
     },
 )

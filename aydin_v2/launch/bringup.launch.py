@@ -116,7 +116,7 @@ def generate_launch_description():
     )
     shutdown_path_executor_after_execution_arg = DeclareLaunchArgument(
         "shutdown_path_executor_after_execution",
-        default_value="true",
+        default_value="false",
         description="Shutdown the path executor after it completes one path.",
     )
 

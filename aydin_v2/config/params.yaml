@@ -67,7 +67,7 @@ nub_path_executor_node_v2:
     gripper_toggle_delay_sec: 0.5
     gripper_cycles_per_nub: 1
     post_segment_settle_sec: 0.2
-    shutdown_after_execution: true
+    shutdown_after_execution: false
     avoid_collisions: true
     use_current_end_effector_orientation: true
     tool_orientation_x: 0.0

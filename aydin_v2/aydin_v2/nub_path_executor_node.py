@@ -44,7 +44,7 @@ class NubPathExecutorNode(Node):
         self.declare_parameter("gripper_toggle_delay_sec", 0.5)
         self.declare_parameter("gripper_cycles_per_nub", 1)
         self.declare_parameter("post_segment_settle_sec", 0.2)
-        self.declare_parameter("shutdown_after_execution", True)
+        self.declare_parameter("shutdown_after_execution", False)
         self.declare_parameter("avoid_collisions", True)
         self.declare_parameter("use_current_end_effector_orientation", True)
         self.declare_parameter("tool_orientation_x", 0.0)

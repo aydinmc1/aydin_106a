@@ -10,6 +10,9 @@ green_nub_detector_node_v2:
     aruco_pose_topic: /aydin_v2/aruco_poses_v2
     camera_frame: camera_color_optical_frame
     depth_topic: /camera/camera/aligned_depth_to_color/image_raw
+    camera_baseline_x_offset: 0.029
+    camera_baseline_y_offset: 0.0
+    camera_baseline_z_offset: 0.0
     target_frame: base_link
     live_nub_pose_topic: /aydin_v2/live_nubs_v2/poses
     live_nub_detection_topic: /aydin_v2/live_nubs_v2/detections
@@ -56,7 +59,11 @@ nub_path_executor_node_v2:
     end_effector_frame: wrist_3_link
     move_group_name: ur_manipulator
     planning_link_name: wrist_3_link
-    hover_z_offset: 0.185
+    hover_z_offset: 0.33025
+    grasp_z_offset: 0.279
+    hover_grasp_x_adjustment: 0.0
+    hover_grasp_y_adjustment: 0.0
+    hover_grasp_z_adjustment: 0.0
     curve_samples_per_segment: 8
     cartesian_max_step: 0.01
     cartesian_jump_threshold: 0.0
@@ -67,10 +74,41 @@ nub_path_executor_node_v2:
     gripper_toggle_delay_sec: 0.5
     gripper_cycles_per_nub: 1
     post_segment_settle_sec: 0.2
-    shutdown_after_execution: false
+    shutdown_after_execution: true
     avoid_collisions: true
     use_current_end_effector_orientation: true
     tool_orientation_x: 0.0
     tool_orientation_y: 1.0
     tool_orientation_z: 0.0
     tool_orientation_w: 0.0
+
+aruco_home_node_v2:
+  ros__parameters:
+    home_service_name: /home_to_aruco_v2
+    joint_states_topic: /joint_states
+    cartesian_path_service_name: /compute_cartesian_path
+    execute_trajectory_action_name: /execute_trajectory
+    target_frame: base_link
+    aruco_marker_id: 1
+    aruco_marker_frame: ar_marker_v2_1
+    aruco_marker_size: 0.04
+    home_offset_frame: marker
+    home_offset_x: 0.22
+    home_offset_y: 0.15
+    home_offset_z: 0.34
+    move_group_name: ur_manipulator
+    planning_link_name: wrist_3_link
+    end_effector_frame: wrist_3_link
+    cartesian_max_step: 0.01
+    cartesian_jump_threshold: 0.0
+    minimum_cartesian_fraction: 0.95
+    max_joint_speed: 0.35
+    min_waypoint_dt: 0.25
+    client_timeout_sec: 10.0
+    avoid_collisions: true
+    align_wrist_to_aruco_axes: true
+    use_current_end_effector_orientation: true
+    home_orientation_x: 0.0
+    home_orientation_y: 1.0
+    home_orientation_z: 0.0
+    home_orientation_w: 0.0

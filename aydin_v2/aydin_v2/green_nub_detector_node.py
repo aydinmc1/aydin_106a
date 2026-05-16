@@ -68,6 +68,9 @@ class GreenNubDetectorNode(Node):
         self.declare_parameter(
             "depth_topic", "/camera/camera/aligned_depth_to_color/image_raw"
         )
+        self.declare_parameter("camera_baseline_x_offset", 0.325)
+        self.declare_parameter("camera_baseline_y_offset", 0.0)
+        self.declare_parameter("camera_baseline_z_offset", 0.0)
         self.declare_parameter("target_frame", "base_link")
         self.declare_parameter(
             "live_nub_pose_topic", "/aydin_v2/live_nubs_v2/poses"
@@ -102,6 +105,15 @@ class GreenNubDetectorNode(Node):
         self.aruco_pose_topic = self.get_parameter("aruco_pose_topic").value
         self.camera_frame = self.get_parameter("camera_frame").value
         self.depth_topic = self.get_parameter("depth_topic").value
+        self.camera_baseline_x_offset = float(
+            self.get_parameter("camera_baseline_x_offset").value
+        )
+        self.camera_baseline_y_offset = float(
+            self.get_parameter("camera_baseline_y_offset").value
+        )
+        self.camera_baseline_z_offset = float(
+            self.get_parameter("camera_baseline_z_offset").value
+        )
         self.target_frame = self.get_parameter("target_frame").value
         self.live_nub_pose_topic = self.get_parameter("live_nub_pose_topic").value
         self.live_nub_detection_topic = self.get_parameter(
@@ -176,6 +188,12 @@ class GreenNubDetectorNode(Node):
         self.get_logger().info(f"Subscribing to {self.camera_info_topic}")
         self.get_logger().info(f"Publishing debug images to {self.debug_image_topic}")
         self.get_logger().info(f"Publishing ArUco poses to {self.aruco_pose_topic}")
+        self.get_logger().info(
+            "Applying camera baseline offset "
+            f"({self.camera_baseline_x_offset:.3f}, "
+            f"{self.camera_baseline_y_offset:.3f}, "
+            f"{self.camera_baseline_z_offset:.3f}) m in {self.camera_frame}"
+        )
         self.get_logger().info(
             f"Publishing live nub poses to {self.live_nub_pose_topic}"
         )
@@ -715,9 +733,9 @@ class GreenNubDetectorNode(Node):
             )
             pt = PointStamped()
             pt.header.frame_id = self.camera_frame
-            pt.point.x = x
-            pt.point.y = y
-            pt.point.z = z
+            pt.point.x = x + self.camera_baseline_x_offset
+            pt.point.y = y + self.camera_baseline_y_offset
+            pt.point.z = z + self.camera_baseline_z_offset
             pt_base = tf2_geometry_msgs.do_transform_point(pt, transform)
             return pt_base.point
         except Exception as exc:

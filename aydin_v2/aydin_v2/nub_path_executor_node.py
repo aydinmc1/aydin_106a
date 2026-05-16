@@ -1,10 +1,13 @@
 import math
 import threading
 import time
+import urllib.error
+import urllib.request
 
 import numpy as np
 import rclpy
 from geometry_msgs.msg import Pose, PoseArray, PoseStamped
+from rcl_interfaces.msg import SetParametersResult
 from moveit_msgs.action import ExecuteTrajectory
 from moveit_msgs.msg import MoveItErrorCodes, RobotState
 from moveit_msgs.srv import GetCartesianPath
@@ -18,6 +21,7 @@ from std_srvs.srv import Trigger
 from tf2_ros import Buffer, TransformListener
 
 
+
 class NubPathExecutorNode(Node):
     def __init__(self):
         super().__init__("nub_path_executor_node_v2")
@@ -28,12 +32,18 @@ class NubPathExecutorNode(Node):
         self.declare_parameter("joint_states_topic", "/joint_states")
         self.declare_parameter("cartesian_path_service_name", "/compute_cartesian_path")
         self.declare_parameter("execute_trajectory_action_name", "/execute_trajectory")
-        self.declare_parameter("gripper_service_name", "/toggle_gripper")
+        self.declare_parameter("gripper_pi_url", "http://192.168.1.202:5000")
+        self.declare_parameter("gripper_http_timeout_sec", 1.0)
         self.declare_parameter("target_frame", "base_link")
         self.declare_parameter("end_effector_frame", "wrist_3_link")
         self.declare_parameter("move_group_name", "ur_manipulator")
         self.declare_parameter("planning_link_name", "wrist_3_link")
-        self.declare_parameter("hover_z_offset", 0.185)
+        self.declare_parameter("hover_z_offset", .33025)
+        self.declare_parameter("grasp_z_offset", 0.279)
+        self.declare_parameter("hover_grasp_x_adjustment", 0.0)
+        self.declare_parameter("hover_grasp_y_adjustment", 0.0)
+        self.declare_parameter("hover_grasp_z_adjustment", 0.0)
+        self.declare_parameter("release_x_offset", 0.03)
         self.declare_parameter("curve_samples_per_segment", 8)
         self.declare_parameter("cartesian_max_step", 0.01)
         self.declare_parameter("cartesian_jump_threshold", 0.0)
@@ -44,7 +54,7 @@ class NubPathExecutorNode(Node):
         self.declare_parameter("gripper_toggle_delay_sec", 0.5)
         self.declare_parameter("gripper_cycles_per_nub", 1)
         self.declare_parameter("post_segment_settle_sec", 0.2)
-        self.declare_parameter("shutdown_after_execution", False)
+        self.declare_parameter("shutdown_after_execution", True)
         self.declare_parameter("avoid_collisions", True)
         self.declare_parameter("use_current_end_effector_orientation", True)
         self.declare_parameter("tool_orientation_x", 0.0)
@@ -62,12 +72,26 @@ class NubPathExecutorNode(Node):
         self.execute_trajectory_action_name = self.get_parameter(
             "execute_trajectory_action_name"
         ).value
-        self.gripper_service_name = self.get_parameter("gripper_service_name").value
+        self.gripper_pi_url = self.get_parameter("gripper_pi_url").value.rstrip("/")
+        self.gripper_http_timeout_sec = float(
+            self.get_parameter("gripper_http_timeout_sec").value
+        )
         self.target_frame = self.get_parameter("target_frame").value
         self.end_effector_frame = self.get_parameter("end_effector_frame").value
         self.move_group_name = self.get_parameter("move_group_name").value
         self.planning_link_name = self.get_parameter("planning_link_name").value
         self.hover_z_offset = float(self.get_parameter("hover_z_offset").value)
+        self.grasp_z_offset = float(self.get_parameter("grasp_z_offset").value)
+        self.hover_grasp_x_adjustment = float(
+            self.get_parameter("hover_grasp_x_adjustment").value
+        )
+        self.hover_grasp_y_adjustment = float(
+            self.get_parameter("hover_grasp_y_adjustment").value
+        )
+        self.hover_grasp_z_adjustment = float(
+            self.get_parameter("hover_grasp_z_adjustment").value
+        )
+        self.release_x_offset = float(self.get_parameter("release_x_offset").value)
         self.curve_samples_per_segment = max(
             1,
             int(self.get_parameter("curve_samples_per_segment").value),
@@ -107,6 +131,7 @@ class NubPathExecutorNode(Node):
             float(self.get_parameter("tool_orientation_w").value),
         ]
         self.path_orientation = list(self.tool_orientation)
+        self.add_on_set_parameters_callback(self.dynamic_parameter_callback)
 
         self.latest_snapshot = None
         self.latest_joint_state = None
@@ -124,7 +149,7 @@ class NubPathExecutorNode(Node):
             ExecuteTrajectory,
             self.execute_trajectory_action_name,
         )
-        self.gripper_client = self.create_client(Trigger, self.gripper_service_name)
+
 
         self.create_subscription(
             PoseArray,
@@ -201,40 +226,83 @@ class NubPathExecutorNode(Node):
         else:
             self.path_orientation = list(self.tool_orientation)
 
-        target_positions = self.snapshot_to_hover_targets(snapshot)
-        if not target_positions:
+        grasp_positions = self.snapshot_to_grasp_targets(snapshot)
+        if not grasp_positions:
             self.get_logger().error("Snapshot did not contain any nub targets")
             return
 
-        ordered_targets, ordered_indices = self.order_targets(
+        hover_positions = self.grasp_targets_to_hover_targets(grasp_positions)
+        ordered_hover_targets, ordered_indices = self.order_targets(
             current_position,
-            target_positions,
+            hover_positions,
         )
+        ordered_grasp_targets = [grasp_positions[index] for index in ordered_indices]
         self.get_logger().info(f"Visiting nub order: {ordered_indices}")
 
-        control_points = [current_position] + ordered_targets
-        self.publish_path_visualization(control_points)
+        current_path_position = np.array(current_position, dtype=float)
+        self.publish_path_visualization([current_path_position] + ordered_hover_targets)
 
         for segment_index, target_index in enumerate(ordered_indices):
-            segment_points = self.sample_curve_segment(control_points, segment_index)
+            remaining_hover_targets = ordered_hover_targets[segment_index:]
+            control_points = [current_path_position] + remaining_hover_targets
+            segment_points = self.sample_curve_segment(control_points, 0)
             waypoints = [self.position_to_pose(point) for point in segment_points]
-            robot_trajectory = self.compute_cartesian_path(waypoints)
-            if robot_trajectory is None:
-                self.get_logger().error(f"Could not plan to nub {target_index}")
-                return
-
-            self.ensure_trajectory_timing(robot_trajectory)
             self.get_logger().info(
-                f"Moving to nub {target_index} "
+                f"Moving to hover above nub {target_index} "
                 f"({segment_index + 1}/{len(ordered_indices)})"
             )
-            if not self.execute_moveit_trajectory(robot_trajectory):
-                self.get_logger().error(f"Trajectory execution failed at nub {target_index}")
+            if not self.plan_and_execute_waypoints(
+                waypoints,
+                f"hover above nub {target_index}",
+            ):
                 return
 
             time.sleep(self.post_segment_settle_sec)
-            if not self.perform_gripper_cycle(target_index):
+            hover_target = ordered_hover_targets[segment_index]
+            grasp_target = ordered_grasp_targets[segment_index]
+            approach_distance = hover_target[2] - grasp_target[2]
+            self.get_logger().info(
+                f"Lowering {approach_distance:.3f} m to nub {target_index}"
+            )
+            if not self.plan_and_execute_waypoints(
+                [self.position_to_pose(grasp_target)],
+                f"grasp height for nub {target_index}",
+            ):
                 return
+
+            time.sleep(self.post_segment_settle_sec)
+            if not self.set_gripper_enabled(True, target_index):
+                return
+
+            self.get_logger().info(f"Retreating to hover above nub {target_index}")
+            if not self.plan_and_execute_waypoints(
+                [self.position_to_pose(hover_target)],
+                f"hover retreat for nub {target_index}",
+            ):
+                return
+            time.sleep(self.post_segment_settle_sec)
+
+            release_target = self.hover_target_to_release_target(hover_target)
+            release_distance = np.linalg.norm(release_target - hover_target)
+            if release_distance > 1e-6:
+                self.get_logger().info(
+                    f"Moving {self.release_x_offset:.3f} m in x before releasing nub "
+                    f"{target_index}"
+                )
+                if not self.plan_and_execute_waypoints(
+                    [self.position_to_pose(release_target)],
+                    f"release offset for nub {target_index}",
+                ):
+                    return
+
+                time.sleep(self.post_segment_settle_sec)
+
+            if not self.set_gripper_enabled(False, target_index):
+                return
+            current_path_position = release_target
+            self.publish_path_visualization(
+                [current_path_position] + ordered_hover_targets[segment_index + 1 :]
+            )
 
         self.get_logger().info("Completed nub path execution")
         if self.shutdown_after_execution:
@@ -276,7 +344,7 @@ class NubPathExecutorNode(Node):
             [rotation.x, rotation.y, rotation.z, rotation.w],
         )
 
-    def snapshot_to_hover_targets(self, snapshot):
+    def snapshot_to_grasp_targets(self, snapshot):
         if snapshot.header.frame_id and snapshot.header.frame_id != self.target_frame:
             self.get_logger().warn(
                 f"Snapshot frame is {snapshot.header.frame_id}, "
@@ -288,14 +356,66 @@ class NubPathExecutorNode(Node):
             targets.append(
                 np.array(
                     [
-                        pose.position.x,
-                        pose.position.y,
-                        pose.position.z + self.hover_z_offset,
+                        pose.position.x + self.hover_grasp_x_adjustment,
+                        pose.position.y + self.hover_grasp_y_adjustment,
+                        pose.position.z
+                        + self.grasp_z_offset
+                        + self.hover_grasp_z_adjustment,
                     ],
                     dtype=float,
                 )
             )
         return targets
+
+    def dynamic_parameter_callback(self, parameters):
+        adjustable_parameters = {
+            "hover_z_offset": "hover_z_offset",
+            "grasp_z_offset": "grasp_z_offset",
+            "hover_grasp_x_adjustment": "hover_grasp_x_adjustment",
+            "hover_grasp_y_adjustment": "hover_grasp_y_adjustment",
+            "hover_grasp_z_adjustment": "hover_grasp_z_adjustment",
+        }
+
+        updates = {}
+        for parameter in parameters:
+            attribute = adjustable_parameters.get(parameter.name)
+            if attribute is None:
+                continue
+
+            try:
+                value = float(parameter.value)
+            except (TypeError, ValueError):
+                return SetParametersResult(
+                    successful=False,
+                    reason=f"{parameter.name} must be a number",
+                )
+
+            if not math.isfinite(value):
+                return SetParametersResult(
+                    successful=False,
+                    reason=f"{parameter.name} must be finite",
+                )
+
+            updates[attribute] = value
+
+        for attribute, value in updates.items():
+            setattr(self, attribute, value)
+            self.get_logger().info(f"Updated {attribute} to {value:.4f} m")
+
+        return SetParametersResult(successful=True)
+
+    def grasp_targets_to_hover_targets(self, grasp_positions):
+        targets = []
+        for position in grasp_positions:
+            hover_position = np.array(position, dtype=float)
+            hover_position[2] += self.hover_z_offset - self.grasp_z_offset
+            targets.append(hover_position)
+        return targets
+
+    def hover_target_to_release_target(self, hover_position):
+        release_position = np.array(hover_position, dtype=float)
+        release_position[0] += self.release_x_offset
+        return release_position
 
     def order_targets(self, start_position, target_positions):
         closest_index = min(
@@ -447,6 +567,19 @@ class NubPathExecutorNode(Node):
 
         self.path_pub.publish(path)
 
+    def plan_and_execute_waypoints(self, waypoints, description):
+        robot_trajectory = self.compute_cartesian_path(waypoints)
+        if robot_trajectory is None:
+            self.get_logger().error(f"Could not plan to {description}")
+            return False
+
+        self.ensure_trajectory_timing(robot_trajectory)
+        if not self.execute_moveit_trajectory(robot_trajectory):
+            self.get_logger().error(f"Trajectory execution failed to {description}")
+            return False
+
+        return True
+
     def compute_cartesian_path(self, waypoints):
         if not self.cartesian_path_client.wait_for_service(
             timeout_sec=self.client_timeout_sec
@@ -592,31 +725,35 @@ class NubPathExecutorNode(Node):
 
         return True
 
-    def perform_gripper_cycle(self, target_index):
+    def set_gripper_enabled(self, enabled, target_index):
         if self.gripper_cycles_per_nub <= 0:
             return True
 
-        if not self.gripper_client.wait_for_service(timeout_sec=self.client_timeout_sec):
-            self.get_logger().error(
-                f"Gripper service unavailable: {self.gripper_service_name}"
-            )
+        action = "grip" if enabled else "release"
+        endpoint = "on" if enabled else "off"
+        url = f"{self.gripper_pi_url}/{endpoint}"
+        self.get_logger().info(f"Calling Pi gripper to {action} nub {target_index}")
+
+        try:
+            request = urllib.request.Request(url, method="POST")
+            with urllib.request.urlopen(
+                request,
+                timeout=self.gripper_http_timeout_sec,
+            ) as response:
+                if response.status >= 400:
+                    self.get_logger().error(
+                        f"Pi gripper HTTP {response.status} for {url}"
+                    )
+                    return False
+        except (urllib.error.URLError, TimeoutError, OSError) as exc:
+            self.get_logger().error(f"Pi gripper request failed for {url}: {exc}")
             return False
 
-        for cycle_index in range(self.gripper_cycles_per_nub):
-            self.get_logger().info(
-                f"Open/close gripper cycle at nub {target_index} "
-                f"({cycle_index + 1}/{self.gripper_cycles_per_nub})"
-            )
-            for toggle_index in range(2):
-                future = self.gripper_client.call_async(Trigger.Request())
-                response = self.wait_for_future(future, self.client_timeout_sec)
-                if response is None or not response.success:
-                    self.get_logger().error("Gripper toggle failed")
-                    return False
-                if toggle_index == 0:
-                    time.sleep(self.gripper_toggle_delay_sec)
+        time.sleep(self.gripper_toggle_delay_sec)
 
         return True
+
+
 
     def wait_for_future(self, future, timeout_sec):
         event = threading.Event()

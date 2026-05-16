@@ -34,6 +34,21 @@ def generate_launch_description():
         default_value="/camera/camera/aligned_depth_to_color/image_raw",
         description="Aligned depth image topic.",
     )
+    camera_baseline_x_offset_arg = DeclareLaunchArgument(
+        "camera_baseline_x_offset",
+        default_value="0.0", 
+        description="Camera baseline correction along optical-frame x in meters.",
+    ) # the above was -0.015
+    camera_baseline_y_offset_arg = DeclareLaunchArgument(
+        "camera_baseline_y_offset",
+        default_value="0.0",
+        description="Camera baseline correction along optical-frame y in meters.",
+    )
+    camera_baseline_z_offset_arg = DeclareLaunchArgument(
+        "camera_baseline_z_offset",
+        default_value="0",
+        description="Camera baseline correction along optical-frame z in meters.",
+    )
     camera_frame_arg = DeclareLaunchArgument(
         "camera_frame",
         default_value="camera_color_optical_frame",
@@ -56,14 +71,14 @@ def generate_launch_description():
     )
     camera_tf_x_arg = DeclareLaunchArgument(
         "camera_tf_x",
-        default_value="-0.025",
+        default_value="-0.0145",
         description="Static camera transform x offset in meters.",
-    )
+    ) # used to be -0.025; then -0.0115 for actual dims
     camera_tf_y_arg = DeclareLaunchArgument(
         "camera_tf_y",
         default_value="0.13",
         description="Static camera transform y offset in meters.",
-    )
+    ) # originally 0.13
     camera_tf_z_arg = DeclareLaunchArgument(
         "camera_tf_z",
         default_value="0.0",
@@ -111,12 +126,22 @@ def generate_launch_description():
     )
     hover_z_offset_arg = DeclareLaunchArgument(
         "hover_z_offset",
-        default_value="0.185",
+        default_value="0.34525",
         description="Meters above each snapshot nub used for path execution.",
+    )
+    grasp_z_offset_arg = DeclareLaunchArgument(
+        "grasp_z_offset",
+        default_value="0.294",
+        description="Meters above each snapshot nub used for gripper actuation.",
+    )
+    release_x_offset_arg = DeclareLaunchArgument(
+        "release_x_offset",
+        default_value="0.03",
+        description="Meters to move in target-frame x before releasing a grasped nub.",
     )
     shutdown_path_executor_after_execution_arg = DeclareLaunchArgument(
         "shutdown_path_executor_after_execution",
-        default_value="false",
+        default_value="true",
         description="Shutdown the path executor after it completes one path.",
     )
 
@@ -173,6 +198,18 @@ def generate_launch_description():
                 "depth_topic": LaunchConfiguration("depth_topic"),
                 "debug_image_topic": LaunchConfiguration("debug_image_topic"),
                 "camera_frame": LaunchConfiguration("camera_frame"),
+                "camera_baseline_x_offset": ParameterValue(
+                    LaunchConfiguration("camera_baseline_x_offset"),
+                    value_type=float,
+                ),
+                "camera_baseline_y_offset": ParameterValue(
+                    LaunchConfiguration("camera_baseline_y_offset"),
+                    value_type=float,
+                ),
+                "camera_baseline_z_offset": ParameterValue(
+                    LaunchConfiguration("camera_baseline_z_offset"),
+                    value_type=float,
+                ),
                 "target_frame": LaunchConfiguration("target_frame"),
                 "enable_tuning_window": ParameterValue(
                     LaunchConfiguration("enable_tuning_window"),
@@ -215,10 +252,31 @@ def generate_launch_description():
                     LaunchConfiguration("hover_z_offset"),
                     value_type=float,
                 ),
+                "grasp_z_offset": ParameterValue(
+                    LaunchConfiguration("grasp_z_offset"),
+                    value_type=float,
+                ),
+                "release_x_offset": ParameterValue(
+                    LaunchConfiguration("release_x_offset"),
+                    value_type=float,
+                ),
                 "shutdown_after_execution": ParameterValue(
                     LaunchConfiguration("shutdown_path_executor_after_execution"),
                     value_type=bool,
                 ),
+            },
+        ],
+    )
+
+    aruco_home = Node(
+        package="aydin_v2",
+        executable="aruco_home_node_v2",
+        name="aruco_home_node_v2",
+        output="screen",
+        parameters=[
+            params_file,
+            {
+                "target_frame": LaunchConfiguration("target_frame"),
             },
         ],
     )
@@ -229,6 +287,9 @@ def generate_launch_description():
             debug_image_topic_arg,
             camera_info_topic_arg,
             depth_topic_arg,
+            camera_baseline_x_offset_arg,
+            camera_baseline_y_offset_arg,
+            camera_baseline_z_offset_arg,
             camera_frame_arg,
             target_frame_arg,
             camera_tf_parent_frame_arg,
@@ -245,11 +306,14 @@ def generate_launch_description():
             launch_camera_arg,
             launch_path_executor_arg,
             hover_z_offset_arg,
+            grasp_z_offset_arg,
+            release_x_offset_arg,
             shutdown_path_executor_after_execution_arg,
             realsense_launch,
             camera_static_tf,
             green_nub_detector,
             nub_snapshot,
             nub_path_executor,
+            aruco_home,
         ]
     )

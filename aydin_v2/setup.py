@@ -27,6 +27,7 @@ setup(
             "green_nub_detector_node_v2 = aydin_v2.green_nub_detector_node:main",
             "nub_snapshot_node_v2 = aydin_v2.nub_snapshot_node:main",
             "nub_path_executor_node_v2 = aydin_v2.nub_path_executor_node:main",
+            "aruco_home_node_v2 = aydin_v2.aruco_home_node:main",
         ],
     },
 )

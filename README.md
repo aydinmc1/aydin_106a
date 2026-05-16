@@ -7,7 +7,7 @@ ROS 2 Python package for detecting green game-piece nubs with a RealSense camera
 - `green_nub_detector_node_v2`: finds green nubs in RGB images, uses aligned depth to estimate 3D positions, publishes live poses, debug images, and ArUco marker TF.
 - `nub_snapshot_node_v2`: records live nub detections for a few seconds, clusters them, then publishes a clean snapshot.
 - `nub_path_executor_node_v2`: plans a MoveIt Cartesian path through snapshot nubs and calls the Pi gripper over HTTP.
-- `aruco_home_node_v2`: moves the robot to a home pose relative to the detected ArUco marker.
+- `aruco_home_node_v2`: protoype node that homes above the board relative to an arcuo tag
 
 ## Build
 
